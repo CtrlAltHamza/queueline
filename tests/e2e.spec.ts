@@ -1,87 +1,104 @@
 import { test, expect } from "@playwright/test";
 
-test.describe("QueueLine Core End-to-End User Journeys", () => {
-  // Test 1: Customer books an available slot with Pay on Arrival
-  test("1. Customer successfully books an available slot with pay on arrival", async ({ page }) => {
-    await page.goto("/b/glow-clinic");
+test.describe("QueueLine Security & Core Business Workflows", () => {
+  // Test 1: Double-Booking Exclusion Constraint Test
+  test("1. Postgres exclusion constraint prevents double-booking and returns 409 SLOT_CONFLICT", async ({ request }) => {
+    // Generate a unique future slot date to guarantee no collision with existing records
+    const uniqueDays = 30 + Math.floor(Math.random() * 100);
+    const uniqueSlotDate = new Date();
+    uniqueSlotDate.setDate(uniqueSlotDate.getDate() + uniqueDays);
+    uniqueSlotDate.setHours(11, 0, 0, 0);
+    const startsAt = uniqueSlotDate.toISOString();
 
-    // Verify business details render
-    await expect(page.locator("h1")).toContainText("Glow Aesthetic Clinic");
+    const bookingPayload = {
+      business_id: "11111111-1111-1111-1111-111111111111",
+      service_id: "33333333-1111-1111-1111-111111111111",
+      starts_at: startsAt,
+      customer_name: "Original Customer",
+      customer_email: "original@example.com",
+      payment_method: "venue",
+    };
 
-    // Select a date in the slot picker (e.g. tomorrow)
-    const dateButtons = page.locator("button:has-text('Available')");
-    if ((await dateButtons.count()) > 0) {
-      await dateButtons.first().click();
-    }
+    // First booking reservation MUST succeed
+    const firstRes = await request.post("/api/bookings", { data: bookingPayload });
+    expect(firstRes.status(), "Initial slot booking must return HTTP 200").toBe(200);
+    const firstJson = await firstRes.json();
+    expect(firstJson.success).toBe(true);
 
-    // Pick an available slot button
-    const slotButton = page.locator("button:not([disabled]):has-text(':')").first();
-    await expect(slotButton).toBeVisible();
-    await slotButton.click();
-
-    // Fill customer contact intake form
-    await page.fill('input[placeholder="e.g. Sarah Jenkins"]', "Playwright Test User");
-    await page.fill('input[placeholder="sarah@example.com"]', "playwright.test@example.com");
-    await page.fill('input[placeholder="+1 (555) 234-5678"]', "+1 555 019 2834");
-
-    // Choose Pay on Arrival (Cash)
-    await page.click("text=Pay on Arrival");
-
-    // Submit booking
-    await page.click('button:has-text("Confirm & Reserve")');
-
-    // Should redirect to success page
-    await expect(page).toHaveURL(/.*\/success.*/);
-    await expect(page.locator("body")).toContainText("Confirmed");
-  });
-
-  // Test 2: Conflict handling - double booking prevention
-  test("2. Double-booking conflict is blocked and displays conflict alert", async ({ page }) => {
-    // Attempt booking conflict via direct API collision test
-    const response = await page.request.post("/api/bookings", {
+    // Second booking on identical slot interval MUST be rejected by database exclusion constraint
+    const conflictRes = await request.post("/api/bookings", {
       data: {
-        business_id: "11111111-1111-1111-1111-111111111111",
-        service_id: "33333333-1111-1111-1111-111111111111",
-        starts_at: new Date(Date.now() + 86400000).toISOString(),
-        customer_name: "Customer A",
-        customer_email: "a@example.com",
-        payment_method: "venue",
+        ...bookingPayload,
+        customer_name: "Colliding Customer",
+        customer_email: "colliding@example.com",
       },
     });
 
-    if (response.status() === 200 || response.status() === 201) {
-      const firstBooking = await response.json();
-
-      // Submit identical second booking at the same start time
-      const conflictResponse = await page.request.post("/api/bookings", {
-        data: {
-          business_id: "11111111-1111-1111-1111-111111111111",
-          service_id: "33333333-1111-1111-1111-111111111111",
-          starts_at: firstBooking.booking.starts_at,
-          customer_name: "Customer B",
-          customer_email: "b@example.com",
-          payment_method: "venue",
-        },
-      });
-
-      // Exclusion constraint must reject with HTTP 409 Conflict
-      expect(conflictResponse.status()).toBe(409);
-      const json = await conflictResponse.json();
-      expect(json.code).toBe("SLOT_CONFLICT");
-    }
+    expect(conflictRes.status(), "Double-booking attempt must be rejected with HTTP 409 Conflict").toBe(409);
+    const conflictJson = await conflictRes.json();
+    expect(conflictJson.code).toBe("SLOT_CONFLICT");
+    expect(conflictJson.error).toContain("That time slot was just taken");
   });
 
-  // Test 3: Owner logs in and views their business schedule
-  test("3. Owner views business bookings and schedule management", async ({ page }) => {
-    // Navigate to owner portal
+  // Test 2: Unauthenticated Middleware Route Guards
+  test("2. Protected portal routes redirect unauthenticated visitors to login", async ({ page }) => {
+    // Attempt visiting Owner portal
     await page.goto("/owner");
+    await expect(page).toHaveURL(/\/login\?next=%2Fowner/);
 
-    // When not logged in, middleware or component guards the page
-    const loginPrompt = page.locator("text=Owner Access Required");
-    const ownerTitle = page.locator("text=Owner Business Console");
+    // Attempt visiting Staff operational portal
+    await page.goto("/staff");
+    await expect(page).toHaveURL(/\/login\?next=%2Fstaff/);
 
-    // Either redirected to login or prompts authentication
-    const isGuarded = (await loginPrompt.isVisible()) || page.url().includes("/login");
-    expect(isGuarded || (await ownerTitle.isVisible())).toBeTruthy();
+    // Attempt visiting Customer bookings portal
+    await page.goto("/customer/bookings");
+    await expect(page).toHaveURL(/\/login\?next=%2Fcustomer%2Fbookings/);
+  });
+
+  // Test 3: Unauthorized Mutation Rejection on Booking Cancellation
+  test("3. POST /api/bookings/cancel rejects unauthenticated requests with HTTP 401", async ({ request }) => {
+    const res = await request.post("/api/bookings/cancel", {
+      data: {
+        booking_id: "11111111-2222-3333-4444-555555555555",
+      },
+    });
+
+    expect(res.status()).toBe(401);
+    const json = await res.json();
+    expect(json.error).toContain("Authentication required");
+  });
+
+  // Test 4: Unauthorized Mutation Rejection on Queue Advancements
+  test("4. POST /api/queue/call-next rejects unauthenticated requests with HTTP 401", async ({ request }) => {
+    const res = await request.post("/api/queue/call-next", {
+      data: {
+        business_id: "11111111-1111-1111-1111-111111111111",
+      },
+    });
+
+    expect(res.status()).toBe(401);
+    const json = await res.json();
+    expect(json.error).toContain("Authentication required");
+  });
+
+  // Test 5: Safe Slot Interval Discovery (Zero PII Leakage)
+  test("5. GET /api/bookings securely returns busy intervals without leaking customer PII", async ({ request }) => {
+    const res = await request.get("/api/bookings?business_id=11111111-1111-1111-1111-111111111111");
+    expect(res.status()).toBe(200);
+
+    const json = await res.json();
+    expect(Array.isArray(json.bookings)).toBe(true);
+
+    if (json.bookings.length > 0) {
+      const sample = json.bookings[0];
+      // Must contain slot boundaries
+      expect(sample).toHaveProperty("starts_at");
+      expect(sample).toHaveProperty("ends_at");
+      // Must NOT leak customer private information
+      expect(sample).not.toHaveProperty("customer_name");
+      expect(sample).not.toHaveProperty("customer_email");
+      expect(sample).not.toHaveProperty("customer_phone");
+      expect(sample).not.toHaveProperty("notes");
+    }
   });
 });
