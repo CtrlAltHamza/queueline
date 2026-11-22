@@ -4,7 +4,7 @@
 -- ==============================================================================
 
 BEGIN;
-SELECT plan(10);
+SELECT plan(12);
 
 -- Test 1: Verify tables exist
 SELECT has_table('public', 'bookings', 'bookings table must exist');
