@@ -3,7 +3,7 @@ import { stripe } from "@/lib/stripe";
 import { sendBookingConfirmationEmail } from "@/lib/resend";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-// Ticket T6 & T7: Fully Integrated Idempotent Stripe Webhook Handler
+// Ticket T6 & T7: Hardened Idempotent Stripe Webhook Handler
 export async function POST(req: NextRequest) {
   const body = await req.text();
   const sig = req.headers.get("stripe-signature");
@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
     if (webhookSecret && sig) {
       event = stripe.webhooks.constructEvent(body, sig, webhookSecret);
     } else if (process.env.NODE_ENV !== "production" && !webhookSecret) {
-      // Allow development / simulated test event only when secret is not configured
+      // Local dev / test payloads without secret
       event = JSON.parse(body);
     } else {
       return NextResponse.json(
@@ -30,27 +30,7 @@ export async function POST(req: NextRequest) {
 
   const admin: any = createAdminClient();
 
-  // 1. Idempotency Check via public.stripe_events table
-  if (event.id) {
-    const { data: existingEvent } = await admin
-      .from("stripe_events")
-      .select("id")
-      .eq("id", event.id)
-      .single();
-
-    if (existingEvent) {
-      console.log(`[Stripe Webhook] Event ${event.id} already processed. Skipping.`);
-      return NextResponse.json({ received: true, duplicate: true });
-    }
-
-    // Record event to guarantee at-most-once execution
-    await admin.from("stripe_events").insert({
-      id: event.id,
-      type: event.type,
-    });
-  }
-
-  // 2. Handle checkout.session.completed -> Confirm booking & persist to DB
+  // 1. Process Event
   if (event.type === "checkout.session.completed") {
     const session = event.data.object;
     const bookingId = session.metadata?.booking_id;
@@ -75,10 +55,12 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (updateError) {
-      console.error(`[Stripe Webhook] Failed to confirm booking ${bookingId} in database:`, updateError);
+      console.error(`[Stripe Webhook] DB update failed for booking ${bookingId}:`, updateError);
+      // Return 500 so Stripe automatically retries delivery
+      return NextResponse.json({ error: "Failed to persist booking confirmation to database" }, { status: 500 });
     }
 
-    // Send confirmation email with real business & service names
+    // Send confirmation email asynchronously (failure does not reject webhook)
     const customerEmail = session.customer_details?.email || session.customer_email || updatedBooking?.customer_email;
     const customerName = session.customer_details?.name || updatedBooking?.customer_name || "Valued Client";
 
@@ -97,16 +79,13 @@ export async function POST(req: NextRequest) {
         console.error("[Stripe Webhook] Confirmation email dispatch failed silently:", emailErr);
       }
     }
-  }
-
-  // 3. Handle checkout.session.expired -> Release the reserved slot to prevent ghost bookings
-  if (event.type === "checkout.session.expired") {
+  } else if (event.type === "checkout.session.expired") {
     const session = event.data.object;
     const bookingId = session.metadata?.booking_id;
 
     if (bookingId) {
       console.log(`[Stripe Webhook] Checkout expired for booking ${bookingId}. Releasing held slot.`);
-      await admin
+      const { error: expireError } = await admin
         .from("bookings")
         .update({
           status: "cancelled",
@@ -115,6 +94,30 @@ export async function POST(req: NextRequest) {
         })
         .eq("id", bookingId)
         .eq("status", "pending_payment");
+
+      if (expireError) {
+        console.error(`[Stripe Webhook] Failed to release slot for expired session ${bookingId}:`, expireError);
+        return NextResponse.json({ error: "Failed to release held slot" }, { status: 500 });
+      }
+    }
+  }
+
+  // 2. Record event in stripe_events AFTER successful processing
+  // Let unique-constraint conflict handle duplicate events atomically
+  if (event.id) {
+    const { error: insertError } = await admin.from("stripe_events").insert({
+      id: event.id,
+      event_type: event.type,
+      data: event.data || {},
+    });
+
+    if (insertError) {
+      // 23505 = Postgres unique violation (already processed concurrently)
+      if (insertError.code === "23505") {
+        console.log(`[Stripe Webhook] Event ${event.id} already recorded. Handled duplicate atomically.`);
+        return NextResponse.json({ received: true, duplicate: true });
+      }
+      console.warn("[Stripe Webhook] Non-fatal error recording stripe_events row:", insertError);
     }
   }
 

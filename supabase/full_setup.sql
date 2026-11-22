@@ -104,7 +104,11 @@ ALTER TABLE public.bookings ADD CONSTRAINT no_overlapping_bookings
 
 -- Public RPC function to get busy slot intervals (safe for anonymous / customer callers)
 CREATE OR REPLACE FUNCTION public.get_busy_slots(p_business_id UUID)
-RETURNS TABLE (starts_at TIMESTAMPTZ, ends_at TIMESTAMPTZ) AS $$
+RETURNS TABLE (starts_at TIMESTAMPTZ, ends_at TIMESTAMPTZ)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
   RETURN QUERY
   SELECT b.starts_at, b.ends_at
@@ -112,13 +116,17 @@ BEGIN
   WHERE b.business_id = p_business_id
     AND b.status NOT IN ('cancelled', 'no_show');
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 GRANT EXECUTE ON FUNCTION public.get_busy_slots(UUID) TO anon, authenticated, service_role;
 
 -- Automatic Profile Creation on Supabase Auth Sign Up
 CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS trigger AS $$
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
   INSERT INTO public.profiles (id, name, email)
   VALUES (
@@ -132,7 +140,7 @@ BEGIN
       updated_at = NOW();
   RETURN new;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created

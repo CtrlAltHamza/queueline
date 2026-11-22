@@ -52,24 +52,8 @@ export default function OwnerPortalPage() {
         if (memberships && memberships.length > 0 && memberships[0].businesses) {
           activeBiz = memberships[0].businesses;
         } else {
-          // Check fallback via localStorage or demo clinic
-          const storedSlug = typeof window !== "undefined" ? localStorage.getItem("active_business_slug") : null;
-          if (storedSlug) {
-            const { data: bizBySlug } = await (supabase.from("businesses") as any)
-              .select("*")
-              .eq("slug", storedSlug)
-              .single();
-            if (bizBySlug) activeBiz = bizBySlug;
-          }
-
-          if (!activeBiz) {
-            // Check first active business in database
-            const { data: firstBiz } = await (supabase.from("businesses") as any)
-              .select("*")
-              .limit(1)
-              .single();
-            if (firstBiz) activeBiz = firstBiz;
-          }
+          // User is logged in but owns no businesses: do NOT fall back to other tenants' data
+          activeBiz = null;
         }
 
         if (activeBiz) {
@@ -226,6 +210,27 @@ export default function OwnerPortalPage() {
           className="mt-6 inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-indigo-600 text-white font-semibold text-sm hover:bg-indigo-700 transition shadow-md shadow-indigo-200"
         >
           <span>Sign In as Business Owner</span>
+          <ArrowRight className="w-4 h-4" />
+        </Link>
+      </div>
+    );
+  }
+
+  if (!business) {
+    return (
+      <div className="max-w-md mx-auto px-4 py-20 text-center">
+        <div className="w-16 h-16 rounded-3xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto mb-4">
+          <Building2 className="w-8 h-8" />
+        </div>
+        <h1 className="text-2xl font-bold text-slate-900">No Business Registered</h1>
+        <p className="mt-2 text-sm text-slate-500">
+          Your account is verified, but you do not currently own any registered businesses. Register your clinic or salon to access the owner portal.
+        </p>
+        <Link
+          href="/register-business"
+          className="mt-6 inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-indigo-600 text-white font-semibold text-sm hover:bg-indigo-700 transition shadow-md shadow-indigo-200"
+        >
+          <span>Register Your Business</span>
           <ArrowRight className="w-4 h-4" />
         </Link>
       </div>

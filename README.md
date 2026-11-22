@@ -29,7 +29,8 @@ flowchart TD
 
 ## ✨ Key Features
 
-- **Double-Booking Elimination:** Postgres exclusion constraint on `(staff_id, tstzrange(starts_at, ends_at))` for active bookings using the `btree_gist` extension. Overlapping bookings are rejected at the database engine level.
+- **Double-Booking Elimination & Calendar Architecture:** Enforced via PostgreSQL GiST exclusion constraint on `(business_id, tstzrange(starts_at, ends_at))` for active bookings using the `btree_gist` extension. Overlapping reservations are rejected at the database engine level (HTTP 409 `SLOT_CONFLICT`).
+  > **Design Note on Scheduling Architecture:** QueueLine utilizes a business-level calendar constraint (optimized for solo aesthetic practitioners, boutique clinics, and appointment studios). For multi-provider practices with independent practitioner schedules, the exclusion constraint can be expanded to composite `(business_id, staff_id, tstzrange(starts_at, ends_at))` indexing.
 - **Deposit-Secured Bookings & Multi-Payment Strategy:**
   - **Pay at Venue (Primary for Pakistan & Cash-Preferred Markets):** Allows customers to lock in their slot immediately without requiring an upfront credit card. The PostgreSQL exclusion constraint immediately protects the slot against duplicate reservations.
   - **Online Card Deposit (Stripe Test Mode):** Full Stripe Checkout session creation and idempotent webhook handler are fully integrated for international businesses and demonstration.

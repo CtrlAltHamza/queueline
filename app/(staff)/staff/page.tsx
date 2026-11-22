@@ -37,12 +37,8 @@ export default function StaffPortalPage() {
       if (memberships && memberships.length > 0 && memberships[0].businesses) {
         activeBiz = memberships[0].businesses;
       } else {
-        // Fallback to first business
-        const { data: firstBiz } = await (supabase.from("businesses") as any)
-          .select("*")
-          .limit(1)
-          .single();
-        if (firstBiz) activeBiz = firstBiz;
+        // Do not fall back to unrelated tenant's business
+        activeBiz = null;
       }
 
       if (activeBiz) {
@@ -110,6 +106,27 @@ export default function StaffPortalPage() {
           className="mt-6 inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-indigo-600 text-white font-semibold text-sm hover:bg-indigo-700 transition shadow-md shadow-indigo-200"
         >
           <span>Sign In as Staff</span>
+          <ArrowRight className="w-4 h-4" />
+        </Link>
+      </div>
+    );
+  }
+
+  if (!business) {
+    return (
+      <div className="max-w-md mx-auto px-4 py-20 text-center">
+        <div className="w-16 h-16 rounded-3xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto mb-4">
+          <ShieldCheck className="w-8 h-8" />
+        </div>
+        <h1 className="text-2xl font-bold text-slate-900">Staff Membership Required</h1>
+        <p className="mt-2 text-sm text-slate-500">
+          Your account is verified, but you are not registered as a staff member or practitioner for any active business on QueueLine.
+        </p>
+        <Link
+          href="/"
+          className="mt-6 inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-slate-900 text-white font-semibold text-sm hover:bg-slate-800 transition"
+        >
+          <span>Return to Homepage</span>
           <ArrowRight className="w-4 h-4" />
         </Link>
       </div>

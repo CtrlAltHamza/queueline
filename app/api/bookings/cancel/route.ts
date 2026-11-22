@@ -3,7 +3,7 @@ import { CancelBookingSchema } from "@/lib/schemas";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
 
-// Ticket T8: Cancel booking and immediately release the slot in Supabase
+// Ticket T8: Cancel booking and release slot - STRICTLY AUTHORIZED
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -14,19 +14,22 @@ export async function POST(req: NextRequest) {
     }
 
     const { booking_id } = validation.data;
+
+    // 1. Enforce Authentication Check
+    const serverSupabase: any = await createServerSupabase();
+    const { data: authData, error: authError } = await serverSupabase.auth.getUser();
+
+    if (authError || !authData?.user) {
+      return NextResponse.json(
+        { error: "Authentication required. Please sign in to cancel your booking." },
+        { status: 401 }
+      );
+    }
+
+    const userId = authData.user.id;
     const admin: any = createAdminClient();
 
-    // Verify caller authentication if available
-    let userId: string | null = null;
-    try {
-      const serverSupabase: any = await createServerSupabase();
-      const { data: authData } = await serverSupabase.auth.getUser();
-      if (authData?.user) {
-        userId = authData.user.id;
-      }
-    } catch (e) {}
-
-    // Find the booking
+    // 2. Fetch the booking
     const { data: booking, error: findError } = await admin
       .from("bookings")
       .select("id, business_id, customer_id, status")
@@ -45,7 +48,29 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Cancel booking and free the slot in database
+    // 3. Strict Authorization Check:
+    // Either the caller is the customer who made the booking,
+    // OR the caller is a verified owner/staff member of that business.
+    const isCustomer = booking.customer_id === userId;
+
+    if (!isCustomer) {
+      const { data: membership } = await admin
+        .from("memberships")
+        .select("role")
+        .eq("business_id", booking.business_id)
+        .eq("user_id", userId)
+        .in("role", ["owner", "staff"])
+        .maybeSingle();
+
+      if (!membership) {
+        return NextResponse.json(
+          { error: "Forbidden: You do not have permission to cancel this booking." },
+          { status: 403 }
+        );
+      }
+    }
+
+    // 4. Update status to cancelled in database, freeing the slot
     const { error: updateError } = await admin
       .from("bookings")
       .update({
@@ -59,7 +84,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Failed to cancel booking in database" }, { status: 500 });
     }
 
-    console.log(`[Cancel Booking] Booking ${booking_id} cancelled. Calendar slot released.`);
+    console.log(`[Cancel Booking] Booking ${booking_id} cancelled by authorized user ${userId}. Slot released.`);
 
     return NextResponse.json({
       success: true,
