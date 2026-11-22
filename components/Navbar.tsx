@@ -2,17 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Users, Clock, Calendar, BarChart3, Scissors, Sparkles, Store } from "lucide-react";
+import { Users, Clock, Calendar, BarChart3, Building2, LogIn, Sparkles } from "lucide-react";
 
 export function Navbar() {
   const pathname = usePathname();
 
   const navLinks = [
-    { href: "/b/glow-clinic", label: "Glow Clinic (Demo)", icon: Sparkles },
-    { href: "/b/urban-blade", label: "Urban Blade (Demo)", icon: Scissors },
     { href: "/customer/bookings", label: "My Bookings", icon: Calendar },
     { href: "/staff", label: "Staff Queue", icon: Clock },
-    { href: "/owner", label: "Owner Portal", icon: BarChart3 },
+    { href: "/owner", label: "Owner Console", icon: BarChart3 },
   ];
 
   return (
@@ -25,8 +23,8 @@ export function Navbar() {
             </div>
             <span>Queue<span className="text-slate-900">Line</span></span>
           </Link>
-          <span className="hidden md:inline-flex items-center rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-medium text-indigo-700">
-            Live Queue & Booking
+          <span className="hidden lg:inline-flex items-center rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-medium text-indigo-700">
+            Global Booking &amp; Live Queue
           </span>
         </div>
 
@@ -49,6 +47,24 @@ export function Navbar() {
               </Link>
             );
           })}
+
+          <div className="h-6 w-px bg-slate-200 mx-1 hidden sm:block" />
+
+          <Link
+            href="/register-business"
+            className="flex items-center gap-1.5 px-3.5 py-2 text-xs sm:text-sm font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm transition-all"
+          >
+            <Building2 className="w-4 h-4" />
+            <span>Register Business</span>
+          </Link>
+
+          <Link
+            href="/login"
+            className="flex items-center gap-1 px-3 py-2 text-xs sm:text-sm font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition"
+          >
+            <LogIn className="w-4 h-4" />
+            <span className="hidden sm:inline">Sign In</span>
+          </Link>
         </nav>
       </div>
     </header>

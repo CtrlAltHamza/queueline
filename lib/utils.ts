@@ -6,10 +6,18 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function formatCents(cents: number, currency: string = "USD"): string {
-  return (cents / 100).toLocaleString("en-US", {
-    style: "currency",
-    currency,
-  });
+  const curr = (currency || "USD").toUpperCase();
+  if (curr === "PKR") {
+    return `Rs. ${(cents / 100).toLocaleString("en-PK", { maximumFractionDigits: 0 })}`;
+  }
+  try {
+    return (cents / 100).toLocaleString("en-US", {
+      style: "currency",
+      currency: curr,
+    });
+  } catch {
+    return `${curr} ${(cents / 100).toFixed(2)}`;
+  }
 }
 
 export interface SlotAvailability {
