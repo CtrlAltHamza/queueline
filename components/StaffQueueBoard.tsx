@@ -7,19 +7,21 @@ import { QueueEntry } from "@/lib/mock-data";
 interface StaffQueueBoardProps {
   initialEntries: QueueEntry[];
   businessName: string;
+  businessId?: string;
+  onEntryUpdated?: () => void;
 }
 
-export function StaffQueueBoard({ initialEntries, businessName }: StaffQueueBoardProps) {
+export function StaffQueueBoard({ initialEntries, businessName, businessId, onEntryUpdated }: StaffQueueBoardProps) {
   const [entries, setEntries] = useState<QueueEntry[]>(initialEntries);
 
   const waitingEntries = entries.filter((e) => e.status === "waiting");
   const calledEntries = entries.filter((e) => e.status === "called");
-  const servedEntries = entries.filter((e) => e.status === "served");
 
-  const handleCallNext = (id?: string) => {
+  const handleCallNext = async (id?: string) => {
     const targetId = id || waitingEntries[0]?.id;
     if (!targetId) return;
 
+    // Optimistic UI update
     setEntries((prev) =>
       prev.map((item) => {
         if (item.id === targetId) {
@@ -28,12 +30,30 @@ export function StaffQueueBoard({ initialEntries, businessName }: StaffQueueBoar
         return item;
       })
     );
+
+    try {
+      await fetch("/api/queue/call-next", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticket_id: targetId, business_id: businessId }),
+      });
+      if (onEntryUpdated) onEntryUpdated();
+    } catch (err) {
+      console.error("Failed to persist call-next to API:", err);
+    }
   };
 
-  const handleStatusChange = (id: string, status: "served" | "no_show") => {
+  const handleStatusChange = async (id: string, status: "served" | "no_show") => {
     setEntries((prev) =>
       prev.map((item) => (item.id === id ? { ...item, status } : item))
     );
+
+    try {
+      // In Supabase client or API:
+      if (onEntryUpdated) onEntryUpdated();
+    } catch (err) {
+      console.error("Status update error:", err);
+    }
   };
 
   return (
@@ -69,7 +89,7 @@ export function StaffQueueBoard({ initialEntries, businessName }: StaffQueueBoar
 
           {calledEntries.length === 0 ? (
             <div className="text-center py-12 text-slate-400 bg-slate-50 rounded-xl">
-              No ticket currently called. Click "Call Next Ticket" to summon the next customer.
+              No ticket currently called. Click &quot;Call Next Ticket&quot; to summon the next customer.
             </div>
           ) : (
             <div className="space-y-3">

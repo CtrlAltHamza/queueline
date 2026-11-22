@@ -1,12 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Building2, Globe, Clock, DollarSign, CheckCircle2, ArrowRight, ShieldCheck, Sparkles } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+import { Building2, Globe, Clock, DollarSign, CheckCircle2, ArrowRight, ShieldCheck, Sparkles, UserCheck } from "lucide-react";
 
 export default function RegisterBusinessPage() {
   const router = useRouter();
+  const supabase: any = createClient();
+
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
   const [businessName, setBusinessName] = useState("");
   const [slug, setSlug] = useState("");
@@ -24,6 +29,25 @@ export default function RegisterBusinessPage() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Check if caller is already logged in
+  useEffect(() => {
+    async function checkUser() {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          setCurrentUser(user);
+          setOwnerEmail(user.email || "");
+          setOwnerName(user.user_metadata?.full_name || "");
+        }
+      } catch (e) {
+        console.error("Auth check failed:", e);
+      } finally {
+        setCheckingAuth(false);
+      }
+    }
+    checkUser();
+  }, [supabase]);
 
   // Auto-generate slug from business name
   const handleNameChange = (val: string) => {
@@ -67,6 +91,50 @@ export default function RegisterBusinessPage() {
     setError(null);
 
     try {
+      let activeUser = currentUser;
+
+      // If not logged in, perform authenticated sign-up first
+      if (!activeUser) {
+        if (!ownerEmail || !ownerPassword) {
+          throw new Error("Please enter your email and a password to create your owner account.");
+        }
+
+        // 1. Sign up user through Supabase Auth
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          email: ownerEmail,
+          password: ownerPassword,
+          options: {
+            data: {
+              full_name: ownerName || "Business Owner",
+              phone: phone || null,
+            },
+          },
+        });
+
+        if (signUpError) {
+          // If already registered, attempt login
+          if (signUpError.message?.toLowerCase().includes("already registered")) {
+            const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+              email: ownerEmail,
+              password: ownerPassword,
+            });
+            if (signInError) {
+              throw new Error("This email is already registered. Please sign in with your existing password first.");
+            }
+            activeUser = signInData.user;
+          } else {
+            throw new Error(signUpError.message);
+          }
+        } else {
+          activeUser = signUpData.user;
+        }
+
+        if (!activeUser) {
+          throw new Error("Account creation failed. Please check your email and credentials.");
+        }
+      }
+
+      // 2. Call /api/business/register with verified user session
       const res = await fetch("/api/business/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -74,15 +142,11 @@ export default function RegisterBusinessPage() {
           business_name: businessName,
           slug,
           category,
-          country,
           currency,
           timezone,
           deposit_cents: Math.round(Number(depositAmount) * 100),
           address,
           phone,
-          owner_name: ownerName,
-          owner_email: ownerEmail,
-          owner_password: ownerPassword,
         }),
       });
 
@@ -91,12 +155,12 @@ export default function RegisterBusinessPage() {
         throw new Error(data.error || "Failed to register business");
       }
 
-      // Store active business info in localStorage for seamless instant portal access
+      // Store active business info in localStorage for seamless client portal navigation
       localStorage.setItem("active_business_slug", slug);
       localStorage.setItem("active_business_name", businessName);
       localStorage.setItem("active_business_currency", currency);
 
-      // Redirect directly to the owner portal
+      // Redirect to the owner portal
       router.push(`/owner?registered=true&slug=${slug}`);
     } catch (err: any) {
       setError(err.message || "An unexpected error occurred");
@@ -277,53 +341,77 @@ export default function RegisterBusinessPage() {
           <div className="pt-4">
             <h2 className="text-base font-bold text-slate-900 pb-3 border-b border-slate-100 flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-indigo-600" />
-              <span>2. Owner Account Credentials</span>
+              <span>2. Owner Account Verification</span>
             </h2>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
-              <div>
-                <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">
-                  Your Full Name *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={ownerName}
-                  onChange={(e) => setOwnerName(e.target.value)}
-                  placeholder="Dr. Hamza Khurram"
-                  className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
+            {currentUser ? (
+              <div className="mt-4 p-4 rounded-2xl bg-indigo-50/70 border border-indigo-100 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold text-sm">
+                    <UserCheck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-indigo-900 uppercase tracking-wide">
+                      Signed In as Verified Owner
+                    </p>
+                    <p className="text-sm font-semibold text-slate-800">{currentUser.email}</p>
+                  </div>
+                </div>
+                <span className="text-xs text-indigo-700 bg-white px-2.5 py-1 rounded-full border border-indigo-200 font-medium">
+                  Active Session
+                </span>
               </div>
+            ) : (
+              <div className="space-y-4 mt-4">
+                <p className="text-xs text-slate-500">
+                  Create your administrator credentials to securely manage this business and view live bookings.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">
+                      Your Full Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={ownerName}
+                      onChange={(e) => setOwnerName(e.target.value)}
+                      placeholder="Dr. Hamza Khurram"
+                      className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
 
-              <div>
-                <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">
-                  Email Address *
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={ownerEmail}
-                  onChange={(e) => setOwnerEmail(e.target.value)}
-                  placeholder="hamza@example.com"
-                  className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
+                  <div>
+                    <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">
+                      Email Address *
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={ownerEmail}
+                      onChange={(e) => setOwnerEmail(e.target.value)}
+                      placeholder="hamza@example.com"
+                      className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
 
-              <div>
-                <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">
-                  Password *
-                </label>
-                <input
-                  type="password"
-                  required
-                  minLength={6}
-                  value={ownerPassword}
-                  onChange={(e) => setOwnerPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
+                  <div>
+                    <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">
+                      Password *
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      minLength={6}
+                      value={ownerPassword}
+                      onChange={(e) => setOwnerPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -336,10 +424,10 @@ export default function RegisterBusinessPage() {
 
             <button
               type="submit"
-              disabled={loading || !businessName || !slug || !ownerEmail}
+              disabled={loading || !businessName || !slug || (!currentUser && !ownerEmail)}
               className="w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3.5 rounded-xl bg-indigo-600 text-white font-semibold text-sm hover:bg-indigo-700 active:scale-95 transition shadow-lg shadow-indigo-200 disabled:opacity-50"
             >
-              <span>{loading ? "Creating Business..." : "Launch My Business Portal"}</span>
+              <span>{loading ? "Registering Business..." : "Launch My Business Portal"}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>

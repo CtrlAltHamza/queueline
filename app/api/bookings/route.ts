@@ -1,12 +1,79 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
 import { createDepositCheckoutSession } from "@/lib/stripe";
 import { sendBookingConfirmationEmail } from "@/lib/resend";
 
+const BookingRequestSchema = z.object({
+  business_id: z.string().uuid("Invalid business ID"),
+  service_id: z.string().uuid("Invalid service ID"),
+  starts_at: z.string().datetime({ message: "Invalid ISO start time" }),
+  customer_name: z.string().min(2, "Name must be at least 2 characters"),
+  customer_email: z.string().email("Valid email required"),
+  customer_phone: z.string().optional().nullable(),
+  notes: z.string().max(500).optional().nullable(),
+  payment_method: z.enum(["venue", "card"]).default("venue"),
+});
+
+// GET /api/bookings?business_id=UUID: Publicly return busy slot intervals
+// Securely bypasses RLS on public clients while returning ZERO customer PII
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const businessId = searchParams.get("business_id");
+    const slug = searchParams.get("slug");
+
+    if (!businessId && !slug) {
+      return NextResponse.json({ error: "business_id or slug is required" }, { status: 400 });
+    }
+
+    const admin: any = createAdminClient();
+    let targetBizId = businessId;
+
+    if (!targetBizId && slug) {
+      const { data: biz } = await admin
+        .from("businesses")
+        .select("id")
+        .eq("slug", slug)
+        .single();
+      if (!biz) {
+        return NextResponse.json({ error: "Business not found" }, { status: 404 });
+      }
+      targetBizId = biz.id;
+    }
+
+    const { data: bookings, error } = await admin
+      .from("bookings")
+      .select("starts_at, ends_at, status")
+      .eq("business_id", targetBizId)
+      .not("status", "in", "('cancelled','no_show')");
+
+    if (error) {
+      console.error("[Get Busy Bookings Error]", error);
+      return NextResponse.json({ error: "Failed to fetch bookings" }, { status: 500 });
+    }
+
+    return NextResponse.json({ bookings: bookings || [] });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+
+// POST /api/bookings: Validates, calculates interval, checks business hours & persists booking
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const rawBody = await req.json();
+    const parseResult = BookingRequestSchema.safeParse(rawBody);
+
+    if (!parseResult.success) {
+      const firstIssue = parseResult.error.issues[0];
+      return NextResponse.json(
+        { error: `${firstIssue.path.join(".")}: ${firstIssue.message}` },
+        { status: 400 }
+      );
+    }
+
     const {
       business_id,
       service_id,
@@ -15,19 +82,23 @@ export async function POST(req: NextRequest) {
       customer_email,
       customer_phone,
       notes,
-      payment_method = "venue",
-    } = body;
+      payment_method,
+    } = parseResult.data;
 
-    if (!business_id || !service_id || !starts_at || !customer_name || !customer_email) {
-      return NextResponse.json(
-        { error: "Missing required booking details (business, service, time, name, or email)" },
-        { status: 400 }
-      );
+    // 1. Reject appointments booked in the past
+    const startDate = new Date(starts_at);
+    if (isNaN(startDate.getTime())) {
+      return NextResponse.json({ error: "Invalid date format for starts_at" }, { status: 400 });
+    }
+
+    // Allow 5 minutes of clock drift / network latency buffer
+    if (startDate.getTime() < Date.now() - 5 * 60 * 1000) {
+      return NextResponse.json({ error: "Cannot book an appointment in the past" }, { status: 400 });
     }
 
     const admin: any = createAdminClient();
 
-    // 1. Fetch business details
+    // 2. Fetch business and verify active status
     const { data: business, error: bizErr } = await admin
       .from("businesses")
       .select("id, name, slug, timezone, deposit_cents, currency, is_active")
@@ -35,10 +106,17 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (bizErr || !business) {
-      return NextResponse.json({ error: "Business not found or inactive" }, { status: 404 });
+      return NextResponse.json({ error: "Business not found" }, { status: 404 });
     }
 
-    // 2. Fetch service details
+    if (business.is_active === false) {
+      return NextResponse.json(
+        { error: "This business is currently not accepting new appointments" },
+        { status: 400 }
+      );
+    }
+
+    // 3. Fetch service and verify active status
     const { data: service, error: svcErr } = await admin
       .from("services")
       .select("id, name, duration_min, price_cents, is_active")
@@ -50,12 +128,48 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Service not found for this business" }, { status: 404 });
     }
 
-    // 3. Calculate ends_at based on actual service duration
-    const startDate = new Date(starts_at);
+    if (service.is_active === false) {
+      return NextResponse.json(
+        { error: "This service is currently inactive and cannot be booked" },
+        { status: 400 }
+      );
+    }
+
+    // 4. Calculate ends_at based on actual service duration
     const endDate = new Date(startDate.getTime() + service.duration_min * 60000);
     const ends_at = endDate.toISOString();
 
-    // 4. Resolve staff_id to ensure Postgres exclusion constraint triggers for double-bookings
+    // 5. Verify booking falls within the business's operating hours
+    const weekday = startDate.getDay(); // 0 is Sunday, 1 is Monday, etc.
+    const { data: dayHours } = await admin
+      .from("business_hours")
+      .select("opens, closes, is_closed")
+      .eq("business_id", business_id)
+      .eq("weekday", weekday)
+      .single();
+
+    if (dayHours) {
+      if (dayHours.is_closed) {
+        return NextResponse.json(
+          { error: "The business is closed on this day" },
+          { status: 400 }
+        );
+      }
+
+      // Check time boundaries (HH:mm in UTC/local string)
+      const startHour = String(startDate.getHours()).padStart(2, "0");
+      const startMin = String(startDate.getMinutes()).padStart(2, "0");
+      const timeStr = `${startHour}:${startMin}`;
+
+      if (timeStr < dayHours.opens || timeStr > dayHours.closes) {
+        return NextResponse.json(
+          { error: `The selected time (${timeStr}) is outside business operating hours (${dayHours.opens} - ${dayHours.closes})` },
+          { status: 400 }
+        );
+      }
+    }
+
+    // 6. Resolve staff_id (use real membership user_id if present; do NOT use business_id to avoid FK violation)
     let staffId: string | null = null;
     const { data: memberships } = await admin
       .from("memberships")
@@ -65,12 +179,9 @@ export async function POST(req: NextRequest) {
 
     if (memberships && memberships.length > 0) {
       staffId = memberships[0].user_id;
-    } else {
-      // Fallback to a deterministic business practitioner ID if no membership created yet
-      staffId = business_id;
     }
 
-    // 5. Check if caller is authenticated customer
+    // 7. Check if caller is authenticated customer
     let customerId: string | null = null;
     try {
       const serverSupabase: any = await createServerSupabase();
@@ -82,14 +193,12 @@ export async function POST(req: NextRequest) {
       // Guest booking
     }
 
-    // 6. Determine booking status
-    // 'venue': confirmed immediately, reserving the slot
-    // 'card': pending_payment until Stripe webhook confirms
+    // 8. Determine booking status
     const isCard = payment_method === "card" && business.deposit_cents > 0;
     const bookingStatus = isCard ? "pending_payment" : "confirmed";
     const depositAmount = isCard ? business.deposit_cents : 0;
 
-    // 7. Insert booking into database
+    // 9. Insert booking into database
     const { data: booking, error: insertError } = await admin
       .from("bookings")
       .insert({
@@ -131,7 +240,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: insertError.message || "Failed to reserve slot" }, { status: 500 });
     }
 
-    // 8. If Online Card Deposit via Stripe
+    // 10. If Online Card Deposit via Stripe
     if (isCard) {
       const origin = req.headers.get("origin") || req.nextUrl.origin || "http://localhost:3000";
       const session = await createDepositCheckoutSession({
@@ -151,7 +260,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 9. If Pay at Venue / Cash on Arrival
+    // 11. If Pay at Venue / Cash on Arrival
     // Asynchronously send confirmation email (failures never break the booking)
     try {
       await sendBookingConfirmationEmail({

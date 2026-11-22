@@ -1,10 +1,54 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
 
+const RegisterBusinessSchema = z.object({
+  business_name: z.string().min(2, "Business name must be at least 2 characters"),
+  slug: z.string().min(2, "Slug must be at least 2 characters"),
+  category: z.string().default("clinic"),
+  currency: z.string().default("PKR"),
+  timezone: z.string().default("Asia/Karachi"),
+  deposit_cents: z.number().int().min(0).default(0),
+  address: z.string().optional().nullable(),
+  phone: z.string().optional().nullable(),
+});
+
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    // 1. Enforce Authentication Check: Caller must be a verified logged-in user
+    let user: any = null;
+    try {
+      const serverSupabase: any = await createServerSupabase();
+      const { data: authData, error: authError } = await serverSupabase.auth.getUser();
+      if (!authError && authData?.user) {
+        user = authData.user;
+      }
+    } catch (authErr) {
+      console.error("[Register Business Auth Check]", authErr);
+    }
+
+    if (!user) {
+      return NextResponse.json(
+        {
+          error: "Authentication required. Please sign in or create an account before registering your business.",
+          code: "UNAUTHENTICATED",
+        },
+        { status: 401 }
+      );
+    }
+
+    const rawBody = await req.json();
+    const parseResult = RegisterBusinessSchema.safeParse(rawBody);
+
+    if (!parseResult.success) {
+      const firstIssue = parseResult.error.issues[0];
+      return NextResponse.json(
+        { error: `${firstIssue.path.join(".")}: ${firstIssue.message}` },
+        { status: 400 }
+      );
+    }
+
     const {
       business_name,
       slug,
@@ -14,86 +58,31 @@ export async function POST(req: NextRequest) {
       deposit_cents,
       address,
       phone,
-      owner_name,
-      owner_email,
-      owner_password,
-    } = body;
-
-    if (!business_name || !slug) {
-      return NextResponse.json({ error: "Business name and slug are required" }, { status: 400 });
-    }
+    } = parseResult.data;
 
     const admin: any = createAdminClient();
+    const cleanSlug = slug.toLowerCase().trim().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
 
-    // 1. Resolve or Create the Owner User Account
-    let ownerUserId: string | null = null;
+    // 2. Ensure Profile exists in public.profiles for the logged in user
+    const userEmail = user.email || "";
+    const userName = user.user_metadata?.full_name || user.user_metadata?.name || userEmail.split("@")[0] || "Business Owner";
 
-    // Check if the caller is already logged in
-    try {
-      const serverSupabase: any = await createServerSupabase();
-      const { data: authData } = await serverSupabase.auth.getUser();
-      if (authData?.user) {
-        ownerUserId = authData.user.id;
-      }
-    } catch (e) {}
+    const { error: profileError } = await admin.from("profiles").upsert(
+      {
+        id: user.id,
+        name: userName,
+        email: userEmail,
+        phone: phone || user.phone || null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "id" }
+    );
 
-    // If caller is registering fresh with owner_email & owner_password
-    if (!ownerUserId) {
-      if (!owner_email || !owner_password) {
-        return NextResponse.json(
-          { error: "Owner email and password are required to create an owner account." },
-          { status: 400 }
-        );
-      }
-
-      // Try creating user in Supabase Auth
-      const { data: newUser, error: createError } = await admin.auth.admin.createUser({
-        email: owner_email,
-        password: owner_password,
-        email_confirm: true,
-        user_metadata: {
-          full_name: owner_name || "Business Owner",
-          phone: phone || null,
-        },
-      });
-
-      if (createError) {
-        // If user already registered, look them up or request login
-        if (createError.message?.toLowerCase().includes("already registered") || createError.message?.toLowerCase().includes("exists")) {
-          // Find user by email
-          const { data: listData } = await admin.auth.admin.listUsers();
-          const existingUser = listData?.users?.find((u: any) => u.email === owner_email);
-          if (existingUser) {
-            ownerUserId = existingUser.id;
-          } else {
-            return NextResponse.json(
-              { error: "An account with this email already exists. Please sign in first, then register your business." },
-              { status: 409 }
-            );
-          }
-        } else {
-          console.error("[Create Owner Auth Error]", createError);
-          return NextResponse.json({ error: createError.message }, { status: 400 });
-        }
-      } else if (newUser?.user) {
-        ownerUserId = newUser.user.id;
-      }
+    if (profileError) {
+      console.error("[Profile Upsert Error]", profileError);
     }
-
-    if (!ownerUserId) {
-      return NextResponse.json({ error: "Could not establish owner identity." }, { status: 400 });
-    }
-
-    // 2. Ensure Profile exists in public.profiles
-    await admin.from("profiles").upsert({
-      id: ownerUserId,
-      name: owner_name || "Business Owner",
-      email: owner_email || null,
-      phone: phone || null,
-    });
 
     // 3. Insert Business into public.businesses
-    const cleanSlug = slug.toLowerCase().trim().replace(/[^a-z0-9-]+/g, "-");
     const { data: business, error: bizError } = await admin
       .from("businesses")
       .insert({
@@ -112,20 +101,31 @@ export async function POST(req: NextRequest) {
 
     if (bizError || !business) {
       console.error("[Business Registration DB Error]", bizError);
+      if (bizError?.code === "23505" || bizError?.message?.includes("unique")) {
+        return NextResponse.json(
+          { error: `The URL slug '/b/${cleanSlug}' is already taken. Please choose another.` },
+          { status: 409 }
+        );
+      }
       return NextResponse.json({ error: bizError?.message || "Failed to create business" }, { status: 400 });
     }
 
     // 4. CRITICAL: Insert Owner Membership in public.memberships
-    // This allows the owner to pass RLS has_role(business_id, ['owner']) checks
+    // Fail closed: If membership insert fails, delete the created business to prevent orphan tenants
     const { error: memberError } = await admin.from("memberships").insert({
       business_id: business.id,
-      user_id: ownerUserId,
+      user_id: user.id,
       role: "owner",
       display_title: "Owner & Lead Director",
     });
 
     if (memberError) {
-      console.error("[Membership Insert Error]", memberError);
+      console.error("[Membership Insert Failed - Rolling back business creation]", memberError);
+      await admin.from("businesses").delete().eq("id", business.id);
+      return NextResponse.json(
+        { error: "Failed to establish business owner membership. Please try again." },
+        { status: 500 }
+      );
     }
 
     // 5. Initialize Default Weekly Business Hours (Mon - Sat 09:00 - 18:00, Sun closed)
@@ -140,7 +140,7 @@ export async function POST(req: NextRequest) {
     ];
     await admin.from("business_hours").insert(hoursToInsert);
 
-    // 6. Create Starter Service
+    // 6. Create Default Starter Service
     const starterPriceCents = currency === "PKR" ? 200000 : 5000; // Rs. 2,000 or $50
     await admin.from("services").insert({
       business_id: business.id,
@@ -153,13 +153,11 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      business_id: business.id,
-      slug: business.slug,
-      name: business.name,
-      currency: business.currency,
+      business,
+      message: `Business ${business.name} successfully registered. Owner role granted.`,
     });
   } catch (err: any) {
-    console.error("[Registration Fatal Error]", err);
+    console.error("[Business Registration Fatal Error]", err);
     return NextResponse.json({ error: err.message || "An unexpected error occurred" }, { status: 500 });
   }
 }

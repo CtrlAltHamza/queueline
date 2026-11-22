@@ -1,8 +1,40 @@
 import Link from "next/link";
-import { Sparkles, Scissors, Clock, ShieldCheck, ArrowRight, CheckCircle2, Users, Calendar, Building2, Globe } from "lucide-react";
+import { Sparkles, Clock, ShieldCheck, ArrowRight, Users, Calendar, Building2, Globe } from "lucide-react";
 import { INITIAL_BUSINESSES } from "@/lib/mock-data";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { formatCents } from "@/lib/utils";
 
-export default function HomePage() {
+export const revalidate = 0; // Always dynamic to show freshly registered businesses
+
+export default async function HomePage() {
+  let businesses = INITIAL_BUSINESSES;
+
+  try {
+    const admin: any = createAdminClient();
+    const { data: dbBusinesses } = await admin
+      .from("businesses")
+      .select("*")
+      .eq("is_active", true)
+      .order("created_at", { ascending: false });
+
+    if (dbBusinesses && dbBusinesses.length > 0) {
+      businesses = dbBusinesses.map((b: any) => ({
+        id: b.id,
+        slug: b.slug,
+        name: b.name,
+        description: b.description || "Professional services and live appointments.",
+        category: b.category,
+        timezone: b.timezone,
+        deposit_cents: b.deposit_cents || 0,
+        currency: b.currency || "PKR",
+        address: b.address || "Main Street",
+        phone: b.phone || "",
+      }));
+    }
+  } catch (err) {
+    console.error("Failed to load dynamic businesses on homepage:", err);
+  }
+
   return (
     <div className="min-h-full">
       {/* Hero Section */}
@@ -57,48 +89,58 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Demo Business Cards Section */}
+      {/* Dynamic Businesses Directory */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-        <div className="text-center mb-12">
-          <h2 className="text-2xl sm:text-3xl font-bold text-slate-900">Explore Pre-Seeded Portals</h2>
-          <p className="mt-2 text-slate-600 text-sm">
-            Try out how customer booking, walk-in live queue, staff dashboard, or owner analytics work.
-          </p>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-10">
+          <div>
+            <h2 className="text-2xl sm:text-3xl font-bold text-slate-900">Registered Businesses</h2>
+            <p className="mt-1 text-slate-600 text-sm">
+              Discover active clinics, salons, and practices offering online slot booking and walk-in queues.
+            </p>
+          </div>
+
+          <Link
+            href="/register-business"
+            className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-indigo-600 hover:text-indigo-800"
+          >
+            <span>+ Add your business to this directory</span>
+            <ArrowRight className="w-4 h-4" />
+          </Link>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {INITIAL_BUSINESSES.map((biz) => (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {businesses.map((biz) => (
             <div
               key={biz.id}
-              className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm hover:shadow-md transition flex flex-col justify-between"
+              className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm hover:shadow-md transition flex flex-col justify-between"
             >
               <div>
-                <div className="flex items-center justify-between mb-4">
-                  <span className="px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs font-bold uppercase tracking-wider">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-[11px] font-bold uppercase tracking-wider">
                     {biz.category}
                   </span>
                   <span className="text-xs font-semibold text-slate-500">
-                    Deposit: ${(biz.deposit_cents / 100).toFixed(2)}
+                    Deposit: {biz.deposit_cents > 0 ? formatCents(biz.deposit_cents, biz.currency) : "Free / Venue"}
                   </span>
                 </div>
 
-                <h3 className="text-2xl font-bold text-slate-900">{biz.name}</h3>
-                <p className="mt-2 text-sm text-slate-600 leading-relaxed">{biz.description}</p>
-                <p className="mt-3 text-xs text-slate-400">{biz.address}</p>
+                <h3 className="text-xl font-bold text-slate-900">{biz.name}</h3>
+                <p className="mt-2 text-xs text-slate-600 leading-relaxed line-clamp-2">{biz.description}</p>
+                {biz.address && <p className="mt-2 text-[11px] text-slate-400">{biz.address}</p>}
               </div>
 
-              <div className="mt-8 pt-6 border-t border-slate-100 flex flex-wrap gap-3">
+              <div className="mt-6 pt-4 border-t border-slate-100 flex flex-wrap gap-2">
                 <Link
                   href={`/b/${biz.slug}`}
-                  className="flex-1 text-center py-2.5 px-4 rounded-xl bg-indigo-600 text-white font-medium text-xs sm:text-sm hover:bg-indigo-700 transition"
+                  className="flex-1 text-center py-2 px-3 rounded-xl bg-indigo-600 text-white font-medium text-xs hover:bg-indigo-700 transition"
                 >
                   Book Appointment
                 </Link>
                 <Link
                   href={`/b/${biz.slug}/queue`}
-                  className="flex-1 text-center py-2.5 px-4 rounded-xl bg-slate-100 text-slate-800 font-medium text-xs sm:text-sm hover:bg-slate-200 transition"
+                  className="flex-1 text-center py-2 px-3 rounded-xl bg-slate-100 text-slate-800 font-medium text-xs hover:bg-slate-200 transition"
                 >
-                  Join Live Queue
+                  Live Queue
                 </Link>
               </div>
             </div>

@@ -79,14 +79,17 @@ export default function BusinessBookingPage({ params }: { params: Promise<{ slug
           setWeeklyHours(hoursData);
         }
 
-        // 4. Fetch existing active bookings to prevent slot collision
-        const { data: bookingsData } = (await (supabase.from("bookings") as any)
-          .select("starts_at, ends_at, status")
-          .eq("business_id", bizData.id)
-          .not("status", "in", "('cancelled','no_show')")) as any;
-
-        if (bookingsData && bookingsData.length > 0) {
-          setExistingBookings(bookingsData);
+        // 4. Fetch existing active bookings from API (bypassing RLS so all taken slots are visible)
+        try {
+          const res = await fetch(`/api/bookings?business_id=${bizData.id}`);
+          if (res.ok) {
+            const json = await res.json();
+            if (json.bookings && json.bookings.length > 0) {
+              setExistingBookings(json.bookings);
+            }
+          }
+        } catch (err) {
+          console.error("Failed to load busy bookings from API:", err);
         }
       }
     }
