@@ -15,7 +15,7 @@ major_version = 15
 
 [db.seed]
 enabled = true
-sql_paths = ["supabase/seed.sql"]
+sql_paths = ["seed.sql"]
 
 [studio]
 enabled = true
@@ -36,6 +36,6 @@ jwt_expiry = 3600
 enable_signup = true
 
 [auth.email]
-enable_signup = true
+enabled = true
 double_confirm_changes = false
 enable_confirmations = false

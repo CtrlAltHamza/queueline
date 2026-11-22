@@ -75,8 +75,9 @@ ON CONFLICT (business_id, user_id) DO NOTHING;
 
 -- Test 3: Anonymous user can view active businesses
 SET LOCAL ROLE anon;
-SELECT results_ne(
-  'SELECT count(*)::integer FROM public.businesses WHERE is_active = true',
+SELECT cmp_ok(
+  (SELECT count(*)::integer FROM public.businesses WHERE is_active = true),
+  '>',
   0,
   'Anonymous users can read active businesses'
 );
@@ -121,8 +122,9 @@ SELECT is_empty(
 
 -- Test 9: Public RPC get_busy_slots returns intervals to anyone without leaking PII
 SET LOCAL ROLE anon;
-SELECT results_ne(
-  'SELECT count(*)::integer FROM public.get_busy_slots(''11111111-0000-0000-0000-000000000001'')',
+SELECT cmp_ok(
+  (SELECT count(*)::integer FROM public.get_busy_slots('11111111-0000-0000-0000-000000000001')),
+  '>',
   0,
   'Public RPC get_busy_slots successfully returns busy intervals to anonymous users'
 );
