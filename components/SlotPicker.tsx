@@ -10,6 +10,7 @@ interface SlotPickerProps {
   businessHoursCloses?: string;
   weeklyHours?: BusinessHours[];
   currency?: string;
+  timezone?: string;
   durationMin: number;
   depositCents: number;
   servicePriceCents: number;
@@ -23,6 +24,7 @@ export function SlotPicker({
   businessHoursCloses = "18:00",
   weeklyHours,
   currency = "PKR",
+  timezone = "Asia/Karachi",
   durationMin,
   depositCents,
   servicePriceCents,
@@ -49,6 +51,7 @@ export function SlotPicker({
         dateStr: selectedDate,
         opens,
         closes,
+        timezone,
         durationMin,
         existingBookings,
         stepMin: 30,

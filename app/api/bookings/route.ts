@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
 import { createDepositCheckoutSession } from "@/lib/stripe";
 import { sendBookingConfirmationEmail } from "@/lib/resend";
+import { getBusinessTimeDetails } from "@/lib/utils";
 
 const BookingRequestSchema = z.object({
   business_id: z.string().uuid("Invalid business ID"),
@@ -139,8 +140,11 @@ export async function POST(req: NextRequest) {
     const endDate = new Date(startDate.getTime() + service.duration_min * 60000);
     const ends_at = endDate.toISOString();
 
-    // 5. Verify booking falls within the business's operating hours
-    const weekday = startDate.getDay(); // 0 is Sunday, 1 is Monday, etc.
+    // 5. Verify booking falls within the business's operating hours in its local timezone
+    const businessTz = business.timezone || "Asia/Karachi";
+    const { weekday, timeStr: startTimeStr } = getBusinessTimeDetails(startDate, businessTz);
+    const { timeStr: endTimeStr } = getBusinessTimeDetails(endDate, businessTz);
+
     const { data: dayHours } = await admin
       .from("business_hours")
       .select("opens, closes, is_closed")
@@ -151,19 +155,14 @@ export async function POST(req: NextRequest) {
     if (dayHours) {
       if (dayHours.is_closed) {
         return NextResponse.json(
-          { error: "The business is closed on this day" },
+          { error: `The business is closed on this day (${businessTz})` },
           { status: 400 }
         );
       }
 
-      // Check time boundaries (HH:mm in UTC/local string)
-      const startHour = String(startDate.getHours()).padStart(2, "0");
-      const startMin = String(startDate.getMinutes()).padStart(2, "0");
-      const timeStr = `${startHour}:${startMin}`;
-
-      if (timeStr < dayHours.opens || timeStr > dayHours.closes) {
+      if (startTimeStr < dayHours.opens || endTimeStr > dayHours.closes) {
         return NextResponse.json(
-          { error: `The selected time (${timeStr}) is outside business operating hours (${dayHours.opens} - ${dayHours.closes})` },
+          { error: `The selected time (${startTimeStr} - ${endTimeStr}) is outside business operating hours (${dayHours.opens} - ${dayHours.closes})` },
           { status: 400 }
         );
       }

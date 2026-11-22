@@ -289,6 +289,7 @@ export default function BusinessBookingPage({ params }: { params: Promise<{ slug
             <SlotPicker
               weeklyHours={weeklyHours}
               currency={currentBusiness.currency}
+              timezone={currentBusiness.timezone}
               durationMin={selectedService.duration_min}
               depositCents={currentBusiness.deposit_cents}
               servicePriceCents={selectedService.price_cents}

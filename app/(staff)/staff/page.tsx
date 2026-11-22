@@ -13,7 +13,7 @@ export default function StaffPortalPage() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [business, setBusiness] = useState<any>(null);
-  const [queueEntries, setQueueEntries] = useState<QueueEntry[]>(INITIAL_QUEUE_ENTRIES);
+  const [queueEntries, setQueueEntries] = useState<QueueEntry[]>([]);
   const [todayBookings, setTodayBookings] = useState<any[]>([]);
 
   const loadStaffData = async () => {

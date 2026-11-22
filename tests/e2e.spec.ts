@@ -1,14 +1,30 @@
 import { test, expect } from "@playwright/test";
+import { parseInBusinessTimezone } from "../lib/utils";
+
+/**
+ * Helper to compute an ISO timestamp for next Wednesday at 14:00
+ * in the business's local timezone (e.g. "America/New_York"), guaranteeing it is open.
+ */
+function getNextWednesdayIso(timeStr: string = "14:00", timeZone: string = "America/New_York"): string {
+  const now = new Date();
+  const currentDay = now.getUTCDay();
+  let daysUntilWed = (3 - currentDay + 7) % 7;
+  if (daysUntilWed === 0) daysUntilWed = 7;
+
+  const targetDate = new Date(now.getTime() + daysUntilWed * 86400000);
+  const yyyy = targetDate.getUTCFullYear();
+  const mm = String(targetDate.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(targetDate.getUTCDate()).padStart(2, "0");
+  const dateStr = `${yyyy}-${mm}-${dd}`;
+
+  return parseInBusinessTimezone(dateStr, timeStr, timeZone).toISOString();
+}
 
 test.describe("QueueLine Security & Core Business Workflows", () => {
-  // Test 1: Double-Booking Exclusion Constraint Test
+  // Test 1: Double-Booking Exclusion Constraint Test on an open business day
   test("1. Postgres exclusion constraint prevents double-booking and returns 409 SLOT_CONFLICT", async ({ request }) => {
-    // Generate a unique future slot date to guarantee no collision with existing records
-    const uniqueDays = 30 + Math.floor(Math.random() * 100);
-    const uniqueSlotDate = new Date();
-    uniqueSlotDate.setDate(uniqueSlotDate.getDate() + uniqueDays);
-    uniqueSlotDate.setHours(11, 0, 0, 0);
-    const startsAt = uniqueSlotDate.toISOString();
+    // Pick Wednesday 14:00 in America/New_York (Glow Clinic is open Mon-Sat 09:00-18:00)
+    const startsAt = getNextWednesdayIso("14:00", "America/New_York");
 
     const bookingPayload = {
       business_id: "11111111-1111-1111-1111-111111111111",
@@ -19,7 +35,7 @@ test.describe("QueueLine Security & Core Business Workflows", () => {
       payment_method: "venue",
     };
 
-    // First booking reservation MUST succeed
+    // First booking reservation MUST succeed with 200
     const firstRes = await request.post("/api/bookings", { data: bookingPayload });
     expect(firstRes.status(), "Initial slot booking must return HTTP 200").toBe(200);
     const firstJson = await firstRes.json();

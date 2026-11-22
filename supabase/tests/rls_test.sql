@@ -27,10 +27,20 @@ VALUES
   ('33333333-0000-0000-0000-000000000002', '22222222-0000-0000-0000-000000000002', 'Dental Polish', 45, 6000, true)
 ON CONFLICT (id) DO NOTHING;
 
--- Mock users
--- Customer 1: 'aaaaaaaa-1111-1111-1111-aaaaaaaaaaaa'
--- Customer 2: 'bbbbbbbb-2222-2222-2222-bbbbbbbbbbbb'
--- Staff A (Clinic A): 'cccccccc-3333-3333-3333-cccccccccccc'
+-- Mock users (insert into auth.users and public.profiles to satisfy foreign key constraints)
+INSERT INTO auth.users (id, aud, role, email, raw_user_meta_data)
+VALUES 
+  ('aaaaaaaa-1111-1111-1111-aaaaaaaaaaaa', 'authenticated', 'authenticated', 'customera@example.com', '{"full_name": "Customer A"}'),
+  ('bbbbbbbb-2222-2222-2222-bbbbbbbbbbbb', 'authenticated', 'authenticated', 'customerb@example.com', '{"full_name": "Customer B"}'),
+  ('cccccccc-3333-3333-3333-cccccccccccc', 'authenticated', 'authenticated', 'staffa@example.com', '{"full_name": "Staff A"}')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.profiles (id, name, email)
+VALUES 
+  ('aaaaaaaa-1111-1111-1111-aaaaaaaaaaaa', 'Customer A', 'customera@example.com'),
+  ('bbbbbbbb-2222-2222-2222-bbbbbbbbbbbb', 'Customer B', 'customerb@example.com'),
+  ('cccccccc-3333-3333-3333-cccccccccccc', 'Staff A', 'staffa@example.com')
+ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.bookings (id, business_id, service_id, customer_id, customer_name, customer_email, starts_at, ends_at, status)
 VALUES 
