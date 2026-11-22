@@ -2,11 +2,11 @@
 
 import { use, useState, useEffect } from "react";
 import { notFound } from "next/navigation";
-import { INITIAL_BUSINESSES, INITIAL_SERVICES, INITIAL_HOURS, INITIAL_BOOKINGS, Business, Service } from "@/lib/mock-data";
+import { INITIAL_BUSINESSES, INITIAL_SERVICES, INITIAL_HOURS, INITIAL_BOOKINGS, Business, Service, BusinessHours } from "@/lib/mock-data";
 import { SlotPicker } from "@/components/SlotPicker";
 import { formatCents } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
-import { Sparkles, MapPin, Phone, Clock, CreditCard, ArrowRight, ShieldCheck, Check, Banknote, Building2 } from "lucide-react";
+import { Sparkles, MapPin, Phone, Clock, CreditCard, ArrowRight, ShieldCheck, Check, Banknote, AlertCircle } from "lucide-react";
 
 export default function BusinessBookingPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params);
@@ -21,6 +21,9 @@ export default function BusinessBookingPage({ params }: { params: Promise<{ slug
     return foundBiz ? INITIAL_SERVICES.filter((s) => s.business_id === foundBiz.id) : [];
   });
 
+  const [weeklyHours, setWeeklyHours] = useState<BusinessHours[]>(INITIAL_HOURS);
+  const [existingBookings, setExistingBookings] = useState<Array<{ starts_at: string; ends_at: string; status: string }>>(INITIAL_BOOKINGS);
+
   const [selectedServiceId, setSelectedServiceId] = useState<string>("");
   const [selectedSlotIso, setSelectedSlotIso] = useState<string>("");
   const [customerName, setCustomerName] = useState("");
@@ -29,17 +32,19 @@ export default function BusinessBookingPage({ params }: { params: Promise<{ slug
   const [notes, setNotes] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"venue" | "card">("venue");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [bookingError, setBookingError] = useState<string | null>(null);
 
-  // Fetch dynamic business from Supabase if not in static seed
+  // Fetch dynamic business, its services, real business hours, and active bookings from Supabase
   useEffect(() => {
-    async function fetchBusiness() {
+    async function loadBusinessData() {
+      // 1. Fetch business
       const { data: bizData } = (await (supabase.from("businesses") as any)
         .select("*")
         .eq("slug", slug)
         .single()) as any;
 
       if (bizData) {
-        setBusiness({
+        const loadedBusiness: Business = {
           id: bizData.id,
           slug: bizData.slug,
           name: bizData.name,
@@ -50,9 +55,10 @@ export default function BusinessBookingPage({ params }: { params: Promise<{ slug
           currency: bizData.currency || "PKR",
           address: bizData.address || "",
           phone: bizData.phone || "",
-        });
+        };
+        setBusiness(loadedBusiness);
 
-        // Fetch services
+        // 2. Fetch services
         const { data: svcData } = (await (supabase.from("services") as any)
           .select("*")
           .eq("business_id", bizData.id)
@@ -62,10 +68,30 @@ export default function BusinessBookingPage({ params }: { params: Promise<{ slug
           setServices(svcData);
           setSelectedServiceId(svcData[0].id);
         }
+
+        // 3. Fetch real business hours
+        const { data: hoursData } = (await (supabase.from("business_hours") as any)
+          .select("*")
+          .eq("business_id", bizData.id)
+          .order("weekday", { ascending: true })) as any;
+
+        if (hoursData && hoursData.length > 0) {
+          setWeeklyHours(hoursData);
+        }
+
+        // 4. Fetch existing active bookings to prevent slot collision
+        const { data: bookingsData } = (await (supabase.from("bookings") as any)
+          .select("starts_at, ends_at, status")
+          .eq("business_id", bizData.id)
+          .not("status", "in", "('cancelled','no_show')")) as any;
+
+        if (bookingsData && bookingsData.length > 0) {
+          setExistingBookings(bookingsData);
+        }
       }
     }
 
-    fetchBusiness();
+    loadBusinessData();
   }, [slug]);
 
   // Set default selected service
@@ -104,46 +130,63 @@ export default function BusinessBookingPage({ params }: { params: Promise<{ slug
     description: "Initial consultation session.",
   };
 
-  const activeHours = INITIAL_HOURS.find((h) => !h.is_closed) || { opens: "09:00", closes: "18:00" };
-
   const handleBookAppointment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedSlotIso || !customerName || !customerEmail) return;
 
     setIsSubmitting(true);
-    try {
-      if (paymentMethod === "card" && currentBusiness.deposit_cents > 0) {
-        // Stripe Card Deposit
-        const res = await fetch("/api/stripe/checkout", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            business_id: currentBusiness.id,
-            business_name: currentBusiness.name,
-            service_id: selectedService.id,
-            service_name: selectedService.name,
-            deposit_cents: currentBusiness.deposit_cents,
-            starts_at: selectedSlotIso,
-            customer_name: customerName,
-            customer_email: customerEmail,
-            customer_phone: customerPhone,
-            notes,
-          }),
-        });
+    setBookingError(null);
 
-        const data = await res.json();
-        if (data?.url) {
-          window.location.href = data.url;
-          return;
+    try {
+      // POST to /api/bookings to write to database and enforce exclusion constraints
+      const res = await fetch("/api/bookings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          business_id: currentBusiness.id,
+          service_id: selectedService.id,
+          starts_at: selectedSlotIso,
+          customer_name: customerName,
+          customer_email: customerEmail,
+          customer_phone: customerPhone,
+          notes,
+          payment_method: paymentMethod,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        // If Postgres double-booking exclusion constraint was triggered (409 Conflict)
+        if (res.status === 409 || data.code === "SLOT_CONFLICT") {
+          setBookingError("That time slot was just taken by another customer. Please choose another time.");
+          // Add this taken slot to local state to instantly refresh availability
+          setExistingBookings((prev) => [
+            ...prev,
+            {
+              starts_at: selectedSlotIso,
+              ends_at: new Date(new Date(selectedSlotIso).getTime() + selectedService.duration_min * 60000).toISOString(),
+              status: "confirmed",
+            },
+          ]);
+          setSelectedSlotIso("");
+        } else {
+          setBookingError(data.error || "Failed to complete booking. Please try again.");
         }
+        return;
       }
 
-      // Pay at Venue / Direct Confirmation (works in Pakistan & everywhere without merchant Stripe)
-      const bookingId = `book_${Date.now()}`;
-      window.location.href = `/b/${currentBusiness.slug}/success?booking_id=${bookingId}&venue=true`;
-    } catch (err) {
-      console.error("Booking error:", err);
-      window.location.href = `/b/${currentBusiness.slug}/success?booking_id=book_${Date.now()}`;
+      // Success routing:
+      if (paymentMethod === "card" && data.url) {
+        // Redirect to Stripe checkout
+        window.location.href = data.url;
+      } else {
+        // Pay at Venue: redirect to success page
+        window.location.href = data.redirect_url || `/b/${currentBusiness.slug}/success?booking_id=${data.booking?.id}&venue=true`;
+      }
+    } catch (err: any) {
+      console.error("[Booking Submission Exception]", err);
+      setBookingError(err.message || "An unexpected error occurred while booking. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
@@ -237,17 +280,20 @@ export default function BusinessBookingPage({ params }: { params: Promise<{ slug
             </div>
           </div>
 
-          {/* Slot Picker */}
+          {/* Slot Picker using Business's Real Hours and Bookings */}
           <div>
             <h2 className="font-bold text-slate-900 text-lg mb-4">2. Select Your Time Slot</h2>
             <SlotPicker
-              businessHoursOpens={activeHours.opens}
-              businessHoursCloses={activeHours.closes}
+              weeklyHours={weeklyHours}
+              currency={currentBusiness.currency}
               durationMin={selectedService.duration_min}
               depositCents={currentBusiness.deposit_cents}
               servicePriceCents={selectedService.price_cents}
-              existingBookings={INITIAL_BOOKINGS}
-              onSelectSlot={(slotIso) => setSelectedSlotIso(slotIso)}
+              existingBookings={existingBookings}
+              onSelectSlot={(slotIso) => {
+                setSelectedSlotIso(slotIso);
+                setBookingError(null);
+              }}
               selectedSlotIso={selectedSlotIso}
             />
           </div>
@@ -262,6 +308,14 @@ export default function BusinessBookingPage({ params }: { params: Promise<{ slug
             <h3 className="font-bold text-slate-900 text-lg border-b border-slate-100 pb-3">
               3. Booking &amp; Payment
             </h3>
+
+            {/* Error / Conflict Alert Banner */}
+            {bookingError && (
+              <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
+                <span className="font-medium leading-relaxed">{bookingError}</span>
+              </div>
+            )}
 
             {/* Selected Summary Card */}
             <div className="rounded-xl bg-slate-50 p-4 space-y-2 text-xs">
@@ -279,15 +333,15 @@ export default function BusinessBookingPage({ params }: { params: Promise<{ slug
                   {formatCents(selectedService.price_cents, currentBusiness.currency)}
                 </span>
               </div>
-              {currentBusiness.deposit_cents > 0 && (
+              {currentBusiness.deposit_cents > 0 && paymentMethod === "card" && (
                 <div className="border-t border-slate-200 pt-2 flex justify-between font-bold text-sm text-indigo-700">
-                  <span>Deposit Required:</span>
+                  <span>Required Online Deposit:</span>
                   <span>{formatCents(currentBusiness.deposit_cents, currentBusiness.currency)}</span>
                 </div>
               )}
             </div>
 
-            {/* Payment Method Selector (Pakistan & Global Friendly) */}
+            {/* Payment Method Selector */}
             <div>
               <label className="block text-xs font-semibold uppercase text-slate-500 mb-2">
                 Payment Option
@@ -325,7 +379,7 @@ export default function BusinessBookingPage({ params }: { params: Promise<{ slug
                     <span>Online Deposit</span>
                   </div>
                   <span className="text-[11px] font-normal text-slate-500">
-                    Visa / Mastercard via Stripe
+                    Stripe Card (Test Mode)
                   </span>
                 </button>
               </div>
@@ -395,14 +449,14 @@ export default function BusinessBookingPage({ params }: { params: Promise<{ slug
                 {paymentMethod === "venue" ? (
                   <>
                     <Check className="w-4 h-4" />
-                    <span>Confirm Booking (Pay on Arrival)</span>
+                    <span>{isSubmitting ? "Locking In Slot..." : "Confirm Booking (Pay on Arrival)"}</span>
                   </>
                 ) : (
                   <>
                     <CreditCard className="w-4 h-4" />
                     <span>
                       {isSubmitting
-                        ? "Connecting to Payment Gateway..."
+                        ? "Connecting to Stripe..."
                         : `Pay ${formatCents(currentBusiness.deposit_cents, currentBusiness.currency)} Deposit`}
                     </span>
                   </>
@@ -413,7 +467,7 @@ export default function BusinessBookingPage({ params }: { params: Promise<{ slug
 
             <p className="text-[11px] text-slate-400 text-center flex items-center justify-center gap-1">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-              Guaranteed reservation. Free cancellation anytime.
+              Guaranteed reservation with Postgres double-booking protection.
             </p>
           </form>
         </div>

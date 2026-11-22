@@ -30,7 +30,10 @@ flowchart TD
 ## ✨ Key Features
 
 - **Double-Booking Elimination:** Postgres exclusion constraint on `(staff_id, tstzrange(starts_at, ends_at))` for active bookings using the `btree_gist` extension. Overlapping bookings are rejected at the database engine level.
-- **Deposit-Secured Bookings:** Reduces no-shows by collecting refundable deposits via Stripe Checkout before confirming appointments.
+- **Deposit-Secured Bookings & Multi-Payment Strategy:**
+  - **Pay at Venue (Primary for Pakistan & Cash-Preferred Markets):** Allows customers to lock in their slot immediately without requiring an upfront credit card. The PostgreSQL exclusion constraint immediately protects the slot against duplicate reservations.
+  - **Online Card Deposit (Stripe Test Mode):** Full Stripe Checkout session creation and idempotent webhook handler are fully integrated for international businesses and demonstration.
+  - **Local Card Gateway Extensibility:** Designed for modular expansion to local gateways (such as Safepay or PayFast) for Pakistani card payments.
 - **Idempotent Webhooks:** All incoming Stripe events are logged in the `stripe_events` table by ID to prevent duplicate confirmations or repeat email deliveries.
 - **Live Walk-in Queue:** Customers grab a digital ticket (`#A014`), see their position, people ahead, and receive haptic/audio alerts when called.
 - **Staff Operational Hub:** Receptionists and service providers call the next ticket, mark customers as served, or flag no-shows with single-click actions.

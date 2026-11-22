@@ -2,11 +2,14 @@
 
 import { useState } from "react";
 import { formatCents, SlotAvailability, calculateAvailableSlots } from "@/lib/utils";
+import { BusinessHours } from "@/lib/mock-data";
 import { Calendar as CalendarIcon, Clock, CheckCircle2, AlertCircle } from "lucide-react";
 
 interface SlotPickerProps {
-  businessHoursOpens: string;
-  businessHoursCloses: string;
+  businessHoursOpens?: string;
+  businessHoursCloses?: string;
+  weeklyHours?: BusinessHours[];
+  currency?: string;
   durationMin: number;
   depositCents: number;
   servicePriceCents: number;
@@ -16,8 +19,10 @@ interface SlotPickerProps {
 }
 
 export function SlotPicker({
-  businessHoursOpens,
-  businessHoursCloses,
+  businessHoursOpens = "09:00",
+  businessHoursCloses = "18:00",
+  weeklyHours,
+  currency = "PKR",
   durationMin,
   depositCents,
   servicePriceCents,
@@ -29,38 +34,63 @@ export function SlotPicker({
   const todayStr = new Date().toISOString().split("T")[0];
   const [selectedDate, setSelectedDate] = useState<string>(todayStr);
 
-  const slots = calculateAvailableSlots({
-    dateStr: selectedDate,
-    opens: businessHoursOpens,
-    closes: businessHoursCloses,
-    durationMin,
-    existingBookings,
-    stepMin: 30,
-  });
+  // Determine opening and closing hours for the selected date's day of week
+  const dateObj = new Date(`${selectedDate}T12:00:00`);
+  const dayOfWeek = dateObj.getDay(); // 0 = Sunday, 1 = Monday, ...
+
+  const dayHours = weeklyHours?.find((h) => h.weekday === dayOfWeek);
+  const isClosed = dayHours ? dayHours.is_closed : false;
+  const opens = dayHours?.opens || businessHoursOpens;
+  const closes = dayHours?.closes || businessHoursCloses;
+
+  const slots = isClosed
+    ? []
+    : calculateAvailableSlots({
+        dateStr: selectedDate,
+        opens,
+        closes,
+        durationMin,
+        existingBookings,
+        stepMin: 30,
+      });
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
       <div className="flex items-center justify-between pb-4 border-b border-slate-100">
         <div className="flex items-center gap-2">
           <CalendarIcon className="w-5 h-5 text-indigo-600" />
-          <h3 className="font-semibold text-slate-900 text-lg">Select Date & Time</h3>
+          <h3 className="font-semibold text-slate-900 text-lg">Select Date &amp; Time</h3>
         </div>
         <input
           type="date"
           min={todayStr}
           value={selectedDate}
-          onChange={(e) => setSelectedDate(e.target.value)}
+          onChange={(e) => {
+            setSelectedDate(e.target.value);
+            onSelectSlot(""); // Clear previous selection on date change
+          }}
           aria-label="Select appointment date"
           className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
         />
       </div>
 
       <div className="mt-5">
-        <p className="text-xs uppercase font-bold tracking-wider text-slate-400 mb-3">
-          Available Slots ({durationMin} min session)
-        </p>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs uppercase font-bold tracking-wider text-slate-400">
+            Available Slots ({durationMin} min session)
+          </p>
+          {!isClosed && (
+            <span className="text-xs text-slate-500 font-medium">
+              Operating Hours: {opens} - {closes}
+            </span>
+          )}
+        </div>
 
-        {slots.length === 0 ? (
+        {isClosed ? (
+          <div className="text-center py-8 text-rose-600 bg-rose-50/50 rounded-xl border border-rose-100 text-sm font-medium">
+            This business is closed on this day. Please select another date.
+          </div>
+        ) : slots.length === 0 ? (
           <div className="text-center py-8 text-slate-500 bg-slate-50 rounded-xl">
             No slots available on this date.
           </div>
@@ -102,13 +132,15 @@ export function SlotPicker({
       {selectedSlotIso && (
         <div className="mt-6 pt-5 border-t border-slate-100 bg-indigo-50/50 -mx-6 -mb-6 p-6 rounded-b-2xl">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-slate-600">Deposit required now:</span>
-            <span className="font-bold text-slate-900 text-base">{formatCents(depositCents)}</span>
+            <span className="text-slate-600">Service Fee:</span>
+            <span className="font-bold text-slate-900 text-base">{formatCents(servicePriceCents, currency)}</span>
           </div>
-          <div className="flex items-center justify-between text-xs text-slate-500 mt-1">
-            <span>Remaining at appointment:</span>
-            <span>{formatCents(Math.max(0, servicePriceCents - depositCents))}</span>
-          </div>
+          {depositCents > 0 && (
+            <div className="flex items-center justify-between text-xs text-indigo-700 mt-1 font-semibold">
+              <span>Required Online Deposit:</span>
+              <span>{formatCents(depositCents, currency)}</span>
+            </div>
+          )}
         </div>
       )}
     </div>
