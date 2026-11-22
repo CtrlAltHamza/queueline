@@ -28,7 +28,7 @@ jobs:
       - name: Start Local Supabase & Run pgTAP RLS Tests
         run: |
           supabase start
-          supabase status -o env >> $GITHUB_ENV
+          supabase status -o env | tr -d '"' >> $GITHUB_ENV
           supabase db reset
           supabase test db
 
@@ -53,7 +53,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run Playwright E2E Tests
-        run: npm run test:e2e
+        run: npm run test:e2e -- --project=chromium
         env:
           CI: true
           NEXT_PUBLIC_SUPABASE_URL: ${{ env.API_URL }}
