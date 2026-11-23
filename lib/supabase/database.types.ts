@@ -293,6 +293,9 @@ export type Database = {
         };
       };
     };
+    Views: {
+      [_ in never]: never;
+    };
     Functions: {
       has_role: {
         Args: {
@@ -301,6 +304,39 @@ export type Database = {
         };
         Returns: boolean;
       };
+      get_busy_slots: {
+        Args: {
+          p_business_id: string;
+        };
+        Returns: { starts_at: string; ends_at: string }[];
+      };
+      get_queue_public_status: {
+        Args: {
+          p_business_id: string;
+        };
+        Returns: {
+          waiting_count: number;
+          serving_ticket_no: string | null;
+        };
+      };
+      get_queue_position: {
+        Args: {
+          p_ticket_id: string;
+        };
+        Returns: {
+          people_ahead: number;
+          serving_ticket_no: string | null;
+          status: "waiting" | "called" | "served" | "no_show" | "left";
+          ticket_no: string;
+          estimated_wait_min: number;
+        } | null;
+      };
+    };
+    Enums: {
+      [_ in never]: never;
+    };
+    CompositeTypes: {
+      [_ in never]: never;
     };
   };
 };

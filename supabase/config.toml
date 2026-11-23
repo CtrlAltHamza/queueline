@@ -39,3 +39,6 @@ enable_signup = true
 enabled = true
 double_confirm_changes = false
 enable_confirmations = false
+
+[auth.anonymous_users]
+enabled = true

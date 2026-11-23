@@ -11,7 +11,7 @@ import { Clock, Users, ArrowRight, ShieldCheck, Ticket } from "lucide-react";
 export default function JoinQueuePage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params);
   const router = useRouter();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   const business = INITIAL_BUSINESSES.find((b) => b.slug === slug);
 
@@ -20,19 +20,18 @@ export default function JoinQueuePage({ params }: { params: Promise<{ slug: stri
   const [isJoining, setIsJoining] = useState(false);
   const [waitingCount, setWaitingCount] = useState(INITIAL_QUEUE_ENTRIES.filter((e) => e.status === "waiting").length);
 
-  // Fetch real count from DB if available
+  // Fetch real count from DB via safe public RPC
   useEffect(() => {
     const businessId = business?.id;
     if (!businessId) return;
 
     async function loadCount() {
       try {
-        const { count } = await (supabase.from("queue_entries") as any)
-          .select("id", { count: "exact", head: true })
-          .eq("business_id", businessId)
-          .eq("status", "waiting");
-        if (typeof count === "number") {
-          setWaitingCount(count);
+        const { data } = await supabase.rpc("get_queue_public_status", {
+          p_business_id: businessId,
+        });
+        if (data && typeof data.waiting_count === "number") {
+          setWaitingCount(data.waiting_count);
         }
       } catch (err) {}
     }
@@ -52,12 +51,22 @@ export default function JoinQueuePage({ params }: { params: Promise<{ slug: stri
     const nextTicketNum = `A0${16 + waitingCount}`;
 
     try {
-      // 1. Attempt insert into real Supabase queue_entries table
-      const { data: dbEntry } = await (supabase.from("queue_entries") as any)
+      // 1. Ensure caller has a valid authenticated session (anonymous sign-in for walk-ins)
+      let { data: authData } = await supabase.auth.getUser();
+      let customerId = authData?.user?.id;
+      if (!customerId) {
+        const { data: anonData } = await supabase.auth.signInAnonymously();
+        customerId = anonData?.user?.id;
+      }
+
+      // 2. Insert into real Supabase queue_entries table with customer_id = auth.uid()
+      const { data: dbEntry } = await supabase
+        .from("queue_entries")
         .insert({
           business_id: business.id,
-          customer_name: name,
-          customer_phone: phone,
+          customer_id: customerId,
+          customer_name: name.trim(),
+          customer_phone: phone.trim(),
           ticket_no: nextTicketNum,
           status: "waiting",
           estimated_wait_min: 15 * (waitingCount + 1),

@@ -22,7 +22,7 @@ interface CustomerBooking {
 }
 
 export default function CustomerBookingsPage() {
-  const supabase: any = createClient();
+  const supabase = createClient() as any;
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [bookings, setBookings] = useState<CustomerBooking[]>([]);
@@ -42,7 +42,8 @@ export default function CustomerBookingsPage() {
         setUser(authData.user);
 
         // Fetch user's real bookings from Supabase
-        const { data, error } = await (supabase.from("bookings") as any)
+        const { data, error } = await supabase
+          .from("bookings")
           .select("*, services(name, duration_min), businesses(name, slug, currency)")
           .eq("customer_id", authData.user.id)
           .order("starts_at", { ascending: false });

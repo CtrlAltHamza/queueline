@@ -10,7 +10,7 @@ import { createClient } from "@/lib/supabase/client";
 
 export default function AuthPage() {
   const router = useRouter();
-  const supabase = createClient();
+  const supabase = createClient() as any;
 
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [role, setRole] = useState<"customer" | "business">("customer");
@@ -29,7 +29,7 @@ export default function AuthPage() {
 
     try {
       if (mode === "signup") {
-        const { data, error } = await (supabase.auth as any).signUp({
+        const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
@@ -56,7 +56,7 @@ export default function AuthPage() {
           }
         }, 800);
       } else {
-        const { data, error } = await (supabase.auth as any).signInWithPassword({
+        const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });

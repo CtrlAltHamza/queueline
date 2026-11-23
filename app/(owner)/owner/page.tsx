@@ -12,7 +12,7 @@ import { Plus, Edit2, Trash2, Clock, Calendar, Sparkles, Building2, ArrowRight, 
 import Link from "next/link";
 
 export default function OwnerPortalPage() {
-  const supabase: any = createClient();
+  const supabase = createClient() as any;
 
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -43,11 +43,12 @@ export default function OwnerPortalPage() {
         setUser(authData.user);
 
         // 1. Check owner membership in public.memberships
-        const { data: memberships } = await (supabase.from("memberships") as any)
+        const { data: memberships } = await supabase
+          .from("memberships")
           .select("business_id, role, businesses(*)")
           .eq("user_id", authData.user.id)
           .eq("role", "owner")
-          .limit(1);
+          .limit(1) as any;
 
         let activeBiz: any = null;
 
@@ -62,7 +63,8 @@ export default function OwnerPortalPage() {
           setBusiness(activeBiz);
 
           // 2. Fetch real services from public.services
-          const { data: svcData } = await (supabase.from("services") as any)
+          const { data: svcData } = await supabase
+            .from("services")
             .select("*")
             .eq("business_id", activeBiz.id)
             .eq("is_active", true);
@@ -72,7 +74,8 @@ export default function OwnerPortalPage() {
           }
 
           // 3. Fetch real operating hours from public.business_hours
-          const { data: hoursData } = await (supabase.from("business_hours") as any)
+          const { data: hoursData } = await supabase
+            .from("business_hours")
             .select("*")
             .eq("business_id", activeBiz.id)
             .order("weekday", { ascending: true });
@@ -87,7 +90,8 @@ export default function OwnerPortalPage() {
           const todayEnd = new Date();
           todayEnd.setHours(23, 59, 59, 999);
 
-          const { data: allBookings } = await (supabase.from("bookings") as any)
+          const { data: allBookings } = await supabase
+            .from("bookings")
             .select("starts_at, status, deposit_amount_cents")
             .eq("business_id", activeBiz.id);
 
@@ -130,7 +134,8 @@ export default function OwnerPortalPage() {
     try {
       if (editingService) {
         // Update in Supabase
-        const { error } = await (supabase.from("services") as any)
+        const { error } = await supabase
+          .from("services")
           .update({
             name: serviceData.name,
             description: serviceData.description,
@@ -147,7 +152,8 @@ export default function OwnerPortalPage() {
         );
       } else {
         // Insert in Supabase
-        const { data: newSvc, error } = await (supabase.from("services") as any)
+        const { data: newSvc, error } = await supabase
+          .from("services")
           .insert({
             business_id: business.id,
             name: serviceData.name || "New Treatment",
@@ -175,7 +181,8 @@ export default function OwnerPortalPage() {
     setActionError(null);
 
     try {
-      const { error } = await (supabase.from("services") as any)
+      const { error } = await supabase
+        .from("services")
         .update({ is_active: false })
         .eq("id", id);
 

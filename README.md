@@ -92,6 +92,16 @@ Visit [http://localhost:3000](http://localhost:3000) to view the application.
 
 ---
 
+## 🔐 Security Architecture
+
+- **Queue Entry PII Protection:** `queue_entries` RLS allows customers to read only their own row (`auth.uid() = customer_id`). Staff and owners can read their own business's queue entries via `has_role(business_id, ['owner','staff'])`. Anonymous callers receive zero rows.
+- **Anonymous Sign-in for Walk-ins:** Walk-in customers receive a Supabase Anonymous Auth session on queue join. This gives each ticket holder a stable `customer_id`, satisfying the `auth.uid() = customer_id` policy without requiring account registration. If they later create a full account, identities can be linked.
+- **Public Count RPC:** `get_queue_public_status(business_id)` and `get_queue_position(ticket_id)` are `SECURITY DEFINER` functions that return only aggregate counts and ticket numbers — never names or phone numbers — callable by `anon`.
+- **Insert Restriction:** Queue insertions require `customer_id = auth.uid()`. Bare anonymous inserts (no session) are blocked by RLS policy.
+- **pgTAP Verified:** 21 pgTAP tests prove tenant isolation, booking privacy, queue PII blocking, and the exclusion constraint.
+
+---
+
 ## 📹 Video Walkthrough & Interactive Demo
 
 A 2-minute screen recording demonstrating business onboarding, slot booking, exclusion constraint conflict handling, Supabase Realtime walk-in queue tracking, and owner analytics:

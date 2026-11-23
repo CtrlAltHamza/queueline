@@ -11,7 +11,7 @@ import { ArrowLeft, Clock, Store, Radio } from "lucide-react";
 
 export default function LiveTicketTrackerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const supabase = createClient();
+  const supabase: any = createClient();
 
   const [ticket, setTicket] = useState<{
     id: string;
@@ -52,11 +52,12 @@ export default function LiveTicketTrackerPage({ params }: { params: Promise<{ id
 
   const fetchTicketAndQueue = useCallback(async () => {
     try {
-      // 1. Fetch current ticket from DB
-      const { data: dbTicket } = await (supabase.from("queue_entries") as any)
+      // 1. Fetch current ticket from DB (accessible via RLS to ticket owner only)
+      const { data: dbTicket } = await supabase
+        .from("queue_entries")
         .select("*, businesses(name)")
         .eq("id", id)
-        .maybeSingle();
+        .maybeSingle() as any;
 
       if (dbTicket) {
         setTicket({
@@ -69,28 +70,19 @@ export default function LiveTicketTrackerPage({ params }: { params: Promise<{ id
           business_id: dbTicket.business_id,
           created_at: dbTicket.created_at,
         });
+      }
 
-        // 2. Query other queue entries for this business to determine now-serving and people-ahead
-        const { data: entries } = await (supabase.from("queue_entries") as any)
-          .select("id, ticket_no, status, created_at")
-          .eq("business_id", dbTicket.business_id)
-          .in("status", ["waiting", "called"])
-          .order("created_at", { ascending: true });
+      // 2. Fetch live queue position via safe Security Definer RPC (zero customer PII)
+      const { data: posData } = await supabase.rpc("get_queue_position", {
+        p_ticket_id: id,
+      });
 
-        if (entries && entries.length > 0) {
-          const called = entries.find((e: any) => e.status === "called");
-          if (called) {
-            setNowServing(called.ticket_no);
-          } else {
-            const firstWaiting = entries.find((e: any) => e.status === "waiting");
-            if (firstWaiting) setNowServing(firstWaiting.ticket_no);
-          }
-
-          // Count tickets ahead of this user
-          const ahead = entries.filter(
-            (e: any) => e.status === "waiting" && new Date(e.created_at) < new Date(dbTicket.created_at)
-          ).length;
-          setPeopleAheadCount(ahead);
+      if (posData) {
+        if (typeof posData.people_ahead === "number") {
+          setPeopleAheadCount(posData.people_ahead);
+        }
+        if (posData.serving_ticket_no) {
+          setNowServing(posData.serving_ticket_no);
         }
       }
     } catch (e) {

@@ -10,7 +10,7 @@ import { Sparkles, MapPin, Phone, Clock, CreditCard, ArrowRight, ShieldCheck, Ch
 
 export default function BusinessBookingPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params);
-  const supabase = createClient();
+  const supabase: any = createClient();
 
   const [business, setBusiness] = useState<Business | null>(() => {
     return INITIAL_BUSINESSES.find((b) => b.slug === slug) || null;
@@ -59,10 +59,11 @@ export default function BusinessBookingPage({ params }: { params: Promise<{ slug
         setBusiness(loadedBusiness);
 
         // 2. Fetch services
-        const { data: svcData } = (await (supabase.from("services") as any)
+        const { data: svcData } = await supabase
+          .from("services")
           .select("*")
           .eq("business_id", bizData.id)
-          .eq("is_active", true)) as any;
+          .eq("is_active", true);
 
         if (svcData && svcData.length > 0) {
           setServices(svcData);
@@ -70,10 +71,11 @@ export default function BusinessBookingPage({ params }: { params: Promise<{ slug
         }
 
         // 3. Fetch real business hours
-        const { data: hoursData } = (await (supabase.from("business_hours") as any)
+        const { data: hoursData } = await supabase
+          .from("business_hours")
           .select("*")
           .eq("business_id", bizData.id)
-          .order("weekday", { ascending: true })) as any;
+          .order("weekday", { ascending: true });
 
         if (hoursData && hoursData.length > 0) {
           setWeeklyHours(hoursData);

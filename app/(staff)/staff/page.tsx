@@ -10,7 +10,7 @@ import { Clock, Calendar, CheckCircle, UserX, Phone, Users, ShieldCheck, ArrowRi
 import Link from "next/link";
 
 export default function StaffPortalPage() {
-  const supabase: any = createClient();
+  const supabase = createClient() as any;
 
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -30,9 +30,11 @@ export default function StaffPortalPage() {
       setUser(authData.user);
 
       // 1. Check user memberships
-      const { data: memberships } = await (supabase.from("memberships") as any)
+      const { data: memberships } = await supabase
+        .from("memberships")
         .select("business_id, role, businesses(*)")
         .eq("user_id", authData.user.id)
+        .eq("role", "staff")
         .limit(1);
 
       let activeBiz: any = null;
@@ -46,8 +48,9 @@ export default function StaffPortalPage() {
       if (activeBiz) {
         setBusiness(activeBiz);
 
-        // 2. Fetch live queue entries
-        const { data: qData } = await (supabase.from("queue_entries") as any)
+        // 2. Fetch live queue entries (staff is authorized via RLS has_role)
+        const { data: qData } = await supabase
+          .from("queue_entries")
           .select("*")
           .eq("business_id", activeBiz.id)
           .order("created_at", { ascending: true });
@@ -62,7 +65,8 @@ export default function StaffPortalPage() {
         const todayEnd = new Date();
         todayEnd.setHours(23, 59, 59, 999);
 
-        const { data: bData } = await (supabase.from("bookings") as any)
+        const { data: bData } = await supabase
+          .from("bookings")
           .select("*, services(name, duration_min)")
           .eq("business_id", activeBiz.id)
           .gte("starts_at", todayStart.toISOString())
