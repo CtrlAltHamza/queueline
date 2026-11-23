@@ -1,9 +1,13 @@
 import { z } from "zod";
 
+export const uuidSchema = z
+  .string()
+  .regex(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/, "Invalid UUID");
+
 export const CreateBookingSchema = z.object({
-  business_id: z.string().uuid(),
-  service_id: z.string().uuid(),
-  staff_id: z.string().uuid().optional().nullable(),
+  business_id: uuidSchema,
+  service_id: uuidSchema,
+  staff_id: uuidSchema.optional().nullable(),
   customer_name: z.string().min(2, "Name must be at least 2 characters"),
   customer_email: z.string().email("Valid email address required"),
   customer_phone: z.string().optional().nullable(),
@@ -12,18 +16,18 @@ export const CreateBookingSchema = z.object({
 });
 
 export const JoinQueueSchema = z.object({
-  business_id: z.string().uuid(),
+  business_id: uuidSchema,
   customer_name: z.string().min(2, "Name must be at least 2 characters"),
   customer_phone: z.string().min(7, "Valid phone number required"),
 });
 
 export const CancelBookingSchema = z.object({
-  booking_id: z.string().uuid(),
+  booking_id: uuidSchema,
 });
 
 export const UpdateServiceSchema = z.object({
-  id: z.string().uuid().optional(),
-  business_id: z.string().uuid(),
+  id: uuidSchema.optional(),
+  business_id: uuidSchema,
   name: z.string().min(2, "Service name required"),
   description: z.string().optional().nullable(),
   duration_min: z.number().int().min(5).max(480),
@@ -32,7 +36,7 @@ export const UpdateServiceSchema = z.object({
 });
 
 export const UpdateHoursSchema = z.object({
-  business_id: z.string().uuid(),
+  business_id: uuidSchema,
   weekday: z.number().int().min(0).max(6),
   opens: z.string().regex(/^\d{2}:\d{2}$/, "Format HH:mm required"),
   closes: z.string().regex(/^\d{2}:\d{2}$/, "Format HH:mm required"),
