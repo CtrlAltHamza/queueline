@@ -23,7 +23,7 @@ jobs:
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 3.3.0
 
       - name: Start Local Supabase & Run pgTAP RLS Tests
         run: |
