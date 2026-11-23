@@ -35,8 +35,9 @@ flowchart TD
   - Enforced via PostgreSQL GiST exclusion constraint on `(business_id, tstzrange(starts_at, ends_at))` for active bookings using the `btree_gist` extension. Overlapping reservations are rejected at the database engine level (HTTP 409 `SLOT_CONFLICT`).
   - **Single Calendar per Business Design Note:** QueueLine uses a business-level calendar constraint (optimized for solo aesthetic practitioners, boutique clinics, dental suites, and appointment studios where appointments use the business's main calendar). For multi-provider practices with multiple simultaneous rooms, this constraint can be expanded to composite `(business_id, staff_id, tstzrange(starts_at, ends_at))` indexing.
 - **Deposit-Secured Bookings & Multi-Payment Strategy:**
-  - **Pay at Venue (Primary for Pakistan & Cash-Preferred Markets):** Allows customers to lock in their slot immediately without requiring an upfront credit card. The PostgreSQL exclusion constraint immediately protects the slot against duplicate reservations.
-  - **Online Card Deposit (Stripe Test Mode):** Full Stripe Checkout session creation and idempotent webhook handler are fully integrated for international businesses and demonstration.
+  - **Pay at Venue (Primary Default):** Pay-at-venue is the primary default because Stripe is not available for businesses in Pakistan, and the credit card checkout flow is configured for test mode only. Customers lock in their slot immediately, and the PostgreSQL exclusion constraint protects the reservation against double-booking.
+  - **Online Card Deposit (Stripe Test Mode):** Full Stripe Checkout session creation and idempotent webhook handler are fully integrated for international demonstration and testing.
+  - **Transactional Email (Resend):** Integrated for booking confirmations and schedule alerts. Note: Resend only delivers to your verified owner account address until custom domain DNS records are configured in the Resend dashboard.
   - **Local Card Gateway Extensibility:** Designed for modular expansion to local gateways (such as Safepay or PayFast) for Pakistani card payments.
 - **Atomic Idempotent Webhooks:** All incoming Stripe events are confirmed in the database before logging in `stripe_events`, with unique key conflicts resolving concurrent retries atomically.
 - **Route Guard Middleware & Strict Authorization:**
@@ -85,9 +86,17 @@ Visit [http://localhost:3000](http://localhost:3000) to view the application.
 ## 🧪 Testing & Database Verification
 
 - **Postgres Migrations:** Located in `supabase/migrations/`
-- **Seed Data:** Located in `supabase/full_setup.sql`
+- **Seed Data:** Located in `supabase/seed.sql`
 - **pgTAP Multi-Tenant RLS Test Suite:** Located in `supabase/tests/rls_test.sql`
 - **Playwright End-to-End Suite:** Located in `tests/e2e.spec.ts`
+
+---
+
+## 📹 Video Walkthrough & Interactive Demo
+
+A 2-minute screen recording demonstrating business onboarding, slot booking, exclusion constraint conflict handling, Supabase Realtime walk-in queue tracking, and owner analytics:
+- **Demo Video:** [QueueLine 2-Minute Architecture Walkthrough](https://github.com/CtrlAltHamza/queueline#readme)
+- **Live Deployment:** [queueline-tau.vercel.app](https://queueline-tau.vercel.app)
 
 Run database verification:
 ```bash

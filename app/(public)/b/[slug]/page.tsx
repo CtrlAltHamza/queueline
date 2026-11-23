@@ -95,6 +95,7 @@ export default function BusinessBookingPage({ params }: { params: Promise<{ slug
     }
 
     loadBusinessData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
   // Set default selected service

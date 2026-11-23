@@ -83,7 +83,7 @@ export function QueueTicketCard({
           <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-5 mb-6 animate-pulse">
             <div className="flex items-center justify-center gap-2 text-emerald-800 font-bold text-lg mb-1">
               <Bell className="w-6 h-6 text-emerald-600 animate-bounce" />
-              <span>It's Your Turn! Please proceed to front desk</span>
+              <span>It&apos;s Your Turn! Please proceed to front desk</span>
             </div>
             <p className="text-emerald-700 text-xs">
               Staff is ready to serve you right now.

@@ -42,8 +42,8 @@ export function SlotPicker({
 
   const dayHours = weeklyHours?.find((h) => h.weekday === dayOfWeek);
   const isClosed = dayHours ? dayHours.is_closed : false;
-  const opens = dayHours?.opens || businessHoursOpens;
-  const closes = dayHours?.closes || businessHoursCloses;
+  const opens = (dayHours?.opens || businessHoursOpens).slice(0, 5);
+  const closes = (dayHours?.closes || businessHoursCloses).slice(0, 5);
 
   const slots = isClosed
     ? []

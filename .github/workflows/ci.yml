@@ -35,6 +35,9 @@ jobs:
       - name: Install NPM Dependencies
         run: npm ci
 
+      - name: ESLint Code Quality
+        run: npm run lint
+
       - name: TypeScript Typecheck
         run: npm run typecheck
 

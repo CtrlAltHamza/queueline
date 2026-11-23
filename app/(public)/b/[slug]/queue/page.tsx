@@ -1,35 +1,91 @@
 "use client";
 
-import { use, useState } from "react";
+export const dynamic = "force-dynamic";
+
+import { use, useState, useEffect } from "react";
 import { notFound, useRouter } from "next/navigation";
 import { INITIAL_BUSINESSES, INITIAL_QUEUE_ENTRIES } from "@/lib/mock-data";
+import { createClient } from "@/lib/supabase/client";
 import { Clock, Users, ArrowRight, ShieldCheck, Ticket } from "lucide-react";
 
 export default function JoinQueuePage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params);
   const router = useRouter();
+  const supabase = createClient();
 
   const business = INITIAL_BUSINESSES.find((b) => b.slug === slug);
-  if (!business) {
-    notFound();
-  }
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [isJoining, setIsJoining] = useState(false);
+  const [waitingCount, setWaitingCount] = useState(INITIAL_QUEUE_ENTRIES.filter((e) => e.status === "waiting").length);
 
-  const activeWaiting = INITIAL_QUEUE_ENTRIES.filter((e) => e.status === "waiting");
+  // Fetch real count from DB if available
+  useEffect(() => {
+    const businessId = business?.id;
+    if (!businessId) return;
 
-  const handleJoin = (e: React.FormEvent) => {
+    async function loadCount() {
+      try {
+        const { count } = await (supabase.from("queue_entries") as any)
+          .select("id", { count: "exact", head: true })
+          .eq("business_id", businessId)
+          .eq("status", "waiting");
+        if (typeof count === "number") {
+          setWaitingCount(count);
+        }
+      } catch (err) {}
+    }
+    loadCount();
+  }, [business?.id, supabase]);
+
+  if (!business) {
+    notFound();
+    return null;
+  }
+
+  const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !phone) return;
+    if (!business || !name || !phone) return;
 
     setIsJoining(true);
-    // Generate new ticket
-    const ticketId = `q-${Date.now()}`;
-    const nextTicketNum = `A0${16 + activeWaiting.length}`;
+    const nextTicketNum = `A0${16 + waitingCount}`;
 
-    // Store in session storage for local display
+    try {
+      // 1. Attempt insert into real Supabase queue_entries table
+      const { data: dbEntry } = await (supabase.from("queue_entries") as any)
+        .insert({
+          business_id: business.id,
+          customer_name: name,
+          customer_phone: phone,
+          ticket_no: nextTicketNum,
+          status: "waiting",
+          estimated_wait_min: 15 * (waitingCount + 1),
+        })
+        .select("id")
+        .maybeSingle();
+
+      if (dbEntry?.id) {
+        sessionStorage.setItem(
+          `ticket_${dbEntry.id}`,
+          JSON.stringify({
+            id: dbEntry.id,
+            ticket_no: nextTicketNum,
+            customer_name: name,
+            status: "waiting",
+            estimated_wait_min: 15 * (waitingCount + 1),
+            business_name: business.name,
+          })
+        );
+        router.push(`/queue/${dbEntry.id}`);
+        return;
+      }
+    } catch (err) {
+      console.warn("DB insert fallback to session ticket:", err);
+    }
+
+    // Fallback: Generate local ticket
+    const ticketId = `q-${Date.now()}`;
     sessionStorage.setItem(
       `ticket_${ticketId}`,
       JSON.stringify({
@@ -37,14 +93,14 @@ export default function JoinQueuePage({ params }: { params: Promise<{ slug: stri
         ticket_no: nextTicketNum,
         customer_name: name,
         status: "waiting",
-        estimated_wait_min: 15 * (activeWaiting.length + 1),
+        estimated_wait_min: 15 * (waitingCount + 1),
         business_name: business.name,
       })
     );
 
     setTimeout(() => {
       router.push(`/queue/${ticketId}`);
-    }, 600);
+    }, 400);
   };
 
   return (
@@ -67,7 +123,7 @@ export default function JoinQueuePage({ params }: { params: Promise<{ slug: stri
             <span className="text-xs text-slate-500 font-medium block">People Waiting</span>
             <div className="flex items-center justify-center gap-1.5 text-2xl font-bold text-slate-800 mt-1">
               <Users className="w-5 h-5 text-indigo-600" />
-              <span>{activeWaiting.length}</span>
+              <span>{waitingCount}</span>
             </div>
           </div>
 
@@ -75,7 +131,7 @@ export default function JoinQueuePage({ params }: { params: Promise<{ slug: stri
             <span className="text-xs text-slate-500 font-medium block">Est. Wait Time</span>
             <div className="flex items-center justify-center gap-1.5 text-2xl font-bold text-slate-800 mt-1">
               <Clock className="w-5 h-5 text-indigo-600" />
-              <span>{activeWaiting.length * 15}m</span>
+              <span>{waitingCount * 15}m</span>
             </div>
           </div>
         </div>

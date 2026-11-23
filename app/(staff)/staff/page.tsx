@@ -83,7 +83,33 @@ export default function StaffPortalPage() {
 
   useEffect(() => {
     loadStaffData();
-  }, [supabase]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!business?.id) return;
+
+    const channel = supabase
+      .channel(`staff-queue-live-${business.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "queue_entries",
+          filter: `business_id=eq.${business.id}`,
+        },
+        () => {
+          loadStaffData();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [business?.id, supabase]);
 
   if (loading) {
     return (

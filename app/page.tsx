@@ -179,7 +179,7 @@ export default async function HomePage() {
               </div>
               <h4 className="font-bold text-slate-900">Staff Schedule &amp; Queue</h4>
               <p className="text-xs text-slate-500 mt-1">
-                Call next ticket, mark served, handle no-shows, and view today's timetable.
+                Call next ticket, mark served, handle no-shows, and view today&apos;s timetable.
               </p>
             </Link>
 

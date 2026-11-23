@@ -117,4 +117,25 @@ test.describe("QueueLine Security & Core Business Workflows", () => {
       expect(sample).not.toHaveProperty("notes");
     }
   });
+
+  // Test 6: Slot at exact opening time (09:00) is accepted
+  test("6. Slot at exact opening time (09:00) is accepted without being rejected as outside business hours", async ({ request }) => {
+    // 09:00 America/New_York is Glow Clinic's exact opening time on Wednesday
+    const startsAt = getNextWednesdayIso("09:00", "America/New_York");
+
+    const res = await request.post("/api/bookings", {
+      data: {
+        business_id: "11111111-1111-1111-1111-111111111111",
+        service_id: "33333333-1111-1111-1111-111111111113", // 30 min service (09:00 - 09:30)
+        starts_at: startsAt,
+        customer_name: "Morning Opening Customer",
+        customer_email: "opening@example.com",
+        payment_method: "venue",
+      },
+    });
+
+    expect(res.status(), "Booking at exact opening time must return HTTP 200").toBe(200);
+    const json = await res.json();
+    expect(json.success).toBe(true);
+  });
 });

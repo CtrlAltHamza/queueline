@@ -160,9 +160,12 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      if (startTimeStr < dayHours.opens || endTimeStr > dayHours.closes) {
+      const opensStr = dayHours.opens ? dayHours.opens.slice(0, 5) : "00:00";
+      const closesStr = dayHours.closes ? dayHours.closes.slice(0, 5) : "23:59";
+
+      if (startTimeStr < opensStr || endTimeStr > closesStr) {
         return NextResponse.json(
-          { error: `The selected time (${startTimeStr} - ${endTimeStr}) is outside business operating hours (${dayHours.opens} - ${dayHours.closes})` },
+          { error: `The selected time (${startTimeStr} - ${endTimeStr}) is outside business operating hours (${opensStr} - ${closesStr})` },
           { status: 400 }
         );
       }
