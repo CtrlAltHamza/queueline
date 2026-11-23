@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { uuidSchema } from "@/lib/schemas";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
 import { createDepositCheckoutSession } from "@/lib/stripe";
@@ -7,8 +8,8 @@ import { sendBookingConfirmationEmail } from "@/lib/resend";
 import { getBusinessTimeDetails } from "@/lib/utils";
 
 const BookingRequestSchema = z.object({
-  business_id: z.string().uuid("Invalid business ID"),
-  service_id: z.string().uuid("Invalid service ID"),
+  business_id: uuidSchema,
+  service_id: uuidSchema,
   starts_at: z.string().datetime({ message: "Invalid ISO start time" }),
   customer_name: z.string().min(2, "Name must be at least 2 characters"),
   customer_email: z.string().email("Valid email required"),

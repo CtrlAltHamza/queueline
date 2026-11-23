@@ -37,8 +37,9 @@ test.describe("QueueLine Security & Core Business Workflows", () => {
 
     // First booking reservation MUST succeed with 200
     const firstRes = await request.post("/api/bookings", { data: bookingPayload });
-    expect(firstRes.status(), "Initial slot booking must return HTTP 200").toBe(200);
-    const firstJson = await firstRes.json();
+    const firstText = await firstRes.text();
+    expect(firstRes.status(), `Initial slot booking must return HTTP 200: ${firstText}`).toBe(200);
+    const firstJson = JSON.parse(firstText);
     expect(firstJson.success).toBe(true);
 
     // Second booking on identical slot interval MUST be rejected by database exclusion constraint
@@ -134,8 +135,9 @@ test.describe("QueueLine Security & Core Business Workflows", () => {
       },
     });
 
-    expect(res.status(), "Booking at exact opening time must return HTTP 200").toBe(200);
-    const json = await res.json();
+    const resText = await res.text();
+    expect(res.status(), `Booking at exact opening time must return HTTP 200: ${resText}`).toBe(200);
+    const json = JSON.parse(resText);
     expect(json.success).toBe(true);
   });
 });
